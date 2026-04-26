@@ -75,6 +75,8 @@ def rebuild_state_from_events(table_id: str, events: tuple[Event, ...]) -> Match
             if state.last_deal_result is not None:
                 state = replace(state, last_deal_result=replace(state.last_deal_result, match_complete=True))
             state = replace(state, phase=MatchPhase.MATCH_COMPLETE)
+        elif event.type in {"ActionPrompted", "ActionTimedOut", "TimeoutFallbackApplied"}:
+            pass
         else:
             raise ValueError(f"unsupported event type during replay: {event.type}")
         state = replace(state, event_seq=event.seq)

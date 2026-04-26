@@ -24,6 +24,9 @@ class PublicTableSnapshot:
     current_turn: Seat | None
     finish_order: tuple[Seat, ...]
     event_seq: int
+    action_deadline_epoch_ms: int | None = None
+    action_timeout_seconds: int = 45
+    acting_seat: Seat | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +37,13 @@ class SeatSnapshot:
     legal_action: str | None
 
 
-def public_snapshot(state: MatchState) -> PublicTableSnapshot:
+def public_snapshot(
+    state: MatchState,
+    *,
+    action_deadline_epoch_ms: int | None = None,
+    action_timeout_seconds: int = 45,
+    acting_seat: Seat | None = None,
+) -> PublicTableSnapshot:
     hand_counts: dict[Seat, int] = {}
     current_turn: Seat | None = None
     finish_order: tuple[Seat, ...] = ()
@@ -59,10 +68,21 @@ def public_snapshot(state: MatchState) -> PublicTableSnapshot:
         current_turn=current_turn,
         finish_order=finish_order,
         event_seq=state.event_seq,
+        action_deadline_epoch_ms=action_deadline_epoch_ms,
+        action_timeout_seconds=action_timeout_seconds,
+        acting_seat=acting_seat,
     )
 
 
-def seat_snapshot(state: MatchState, seat: Seat, controller_id: str) -> SeatSnapshot:
+def seat_snapshot(
+    state: MatchState,
+    seat: Seat,
+    controller_id: str,
+    *,
+    action_deadline_epoch_ms: int | None = None,
+    action_timeout_seconds: int = 45,
+    acting_seat: Seat | None = None,
+) -> SeatSnapshot:
     controller = state.controllers.get(seat)
     if controller is None or controller.id != controller_id:
         raise PermissionError("controller is not attached to that seat")
@@ -72,4 +92,14 @@ def seat_snapshot(state: MatchState, seat: Seat, controller_id: str) -> SeatSnap
     legal_action = None
     if state.deal is not None and state.deal.turn == seat and controller.can(ControllerCapability.PLAY):
         legal_action = "lead" if state.deal.current_trick.last_play is None else "play_or_pass"
-    return SeatSnapshot(public=public_snapshot(state), seat=seat, hand=hand, legal_action=legal_action)
+    return SeatSnapshot(
+        public=public_snapshot(
+            state,
+            action_deadline_epoch_ms=action_deadline_epoch_ms,
+            action_timeout_seconds=action_timeout_seconds,
+            acting_seat=acting_seat,
+        ),
+        seat=seat,
+        hand=hand,
+        legal_action=legal_action,
+    )

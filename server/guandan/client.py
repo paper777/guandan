@@ -25,8 +25,22 @@ class GuandanHttpClient:
     timeout: float = 10.0
     transport: Transport | None = None
 
-    def create_table(self) -> JsonObject:
-        return self._request("POST", "/tables")
+    def create_table(
+        self,
+        *,
+        action_timeout_seconds: int | None = None,
+        timeout_fallback: str | None = None,
+    ) -> JsonObject:
+        return self._request(
+            "POST",
+            "/tables",
+            _without_none(
+                {
+                    "action_timeout_seconds": action_timeout_seconds,
+                    "timeout_fallback": timeout_fallback,
+                }
+            ),
+        )
 
     def list_tables(self) -> JsonObject:
         return self._request("GET", "/tables")

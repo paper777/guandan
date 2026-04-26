@@ -12,6 +12,13 @@ from guandan.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
 class TableCreateResponse(BaseModel):
     table_id: str
+    action_timeout_seconds: int = 45
+    timeout_fallback: Literal["auto_pass"] = "auto_pass"
+
+
+class TableCreateRequest(BaseModel):
+    action_timeout_seconds: int = Field(default=45, ge=5, le=300)
+    timeout_fallback: Literal["auto_pass"] = "auto_pass"
 
 
 class TableListResponse(BaseModel):
@@ -37,6 +44,9 @@ class PublicTableSnapshotSchema(BaseModel):
     current_turn: Seat | None
     finish_order: tuple[Seat, ...]
     event_seq: int
+    action_deadline_epoch_ms: int | None = None
+    action_timeout_seconds: int = 45
+    acting_seat: Seat | None = None
 
     @classmethod
     def from_snapshot(cls, snapshot: PublicTableSnapshot) -> PublicTableSnapshotSchema:
@@ -156,4 +166,3 @@ class VersionResponse(BaseModel):
 class ReplayResponse(BaseModel):
     match_id: str
     events: list[EventSchema]
-

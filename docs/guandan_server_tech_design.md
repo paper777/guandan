@@ -6,6 +6,10 @@ Draft, based on the 2017 Huai'an Guandan competition rules page provided by the 
 
 The source page publishes 《掼蛋（国家）竞赛规则（2017版）》 / 《淮安掼蛋竞赛规则》. The first implementation will model the core online game rules and leave offline tournament administration, referee penalties, venue discipline, appeals, and table equipment rules out of runtime scope.
 
+Related review plans:
+
+- [Match Timeout Ticker Design Plan](match_timeout_ticker_plan.md): proposed per-table 45-second action deadline and timeout fallback behavior.
+
 ## Goals
 
 - Build an authoritative Python server for four-player Guandan matches.
@@ -818,13 +822,14 @@ Implemented or partially implemented:
 - Event-log replay rebuild for the currently implemented event set, wired into event-backed `TableActor` initialization.
 - Async serialized `TableActor.dispatch_async` entrypoint for API/WebSocket callers.
 - Cryptographically random unseeded shuffle source, while preserving deterministic seeded deals for tests.
+- Per-table action timeout configuration, default 45-second actor-owned action prompts, public deadline snapshots, timeout audit events, and basic `auto_pass` fallback for play/tribute prompts.
 - Unit tests for core cards, hand types, comparator behavior, reducer flow, snapshots, table actor idempotency/restart, SQLite event storage, replay rebuild, simple policy, external agent payloads, CLI, and app basics.
 
 Still missing or incomplete:
 
 - Full human WebSocket gameplay with controller authentication, private seat snapshots, broadcast fan-out, reconnect, and backpressure handling.
-- Controller prompting, action deadlines, and timeout fallback.
 - Full `ActionPrompt` models and server-computed legal action hints.
+- Broadcast fan-out for timeout-triggered events to already-connected clients.
 - Complete persistence schema for tables, players, controllers, deal results, and visibility metadata.
 - Full tribute edge-case coverage and rejected-command audit persistence.
 - Property tests and mixed-controller integration tests.

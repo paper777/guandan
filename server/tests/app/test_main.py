@@ -84,11 +84,20 @@ class AppTests(unittest.TestCase):
         status, body = asyncio.run(call_app("POST", "/tables"))
         self.assertEqual(status, 201)
         table_id = body["table_id"]
+        self.assertEqual(body["action_timeout_seconds"], 45)
+        self.assertEqual(body["timeout_fallback"], "auto_pass")
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}"))
 
         self.assertEqual(status, 200)
         self.assertEqual(body["table_id"], table_id)
+        self.assertEqual(body["action_timeout_seconds"], 45)
+
+    def test_create_table_accepts_custom_timeout(self) -> None:
+        status, body = asyncio.run(call_app("POST", "/tables", {"action_timeout_seconds": 60}))
+
+        self.assertEqual(status, 201)
+        self.assertEqual(body["action_timeout_seconds"], 60)
 
     def test_join_ready_and_start_table_via_http(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables"))
@@ -115,8 +124,13 @@ class AppTests(unittest.TestCase):
         status, body = asyncio.run(call_app("POST", f"/tables/{table_id}/start", {"seed": "fixed-seed"}))
 
         self.assertEqual(status, 200)
-        self.assertEqual([event["type"] for event in body["events"]], ["MatchStarted", "DealStarted", "CardsDealt"])
+        self.assertEqual(
+            [event["type"] for event in body["events"]],
+            ["MatchStarted", "DealStarted", "CardsDealt", "ActionPrompted"],
+        )
         self.assertEqual(body["snapshot"]["phase"], "PLAYING")
+        self.assertEqual(body["snapshot"]["acting_seat"], "E")
+        self.assertIsNotNone(body["snapshot"]["action_deadline_epoch_ms"])
 
     def test_private_seat_snapshot_requires_attached_controller(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables"))
@@ -144,6 +158,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(body["seat"], "E")
         self.assertEqual(len(body["hand"]), 27)
         self.assertEqual(body["legal_action"], "lead")
+        self.assertEqual(body["public"]["acting_seat"], "E")
+        self.assertIsNotNone(body["public"]["action_deadline_epoch_ms"])
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-S"))
         self.assertEqual(status, 400)

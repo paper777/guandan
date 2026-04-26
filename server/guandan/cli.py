@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
@@ -276,8 +277,11 @@ def format_public_snapshot(snapshot: JsonObject) -> str:
         f"Phase: {snapshot.get('phase', '-')}",
         f"Seq: {snapshot.get('event_seq', '-')}",
         f"Turn: {snapshot.get('current_turn') or '-'}",
-        "Seats:",
     ]
+    timer = format_timer(snapshot)
+    if timer is not None:
+        lines.append(f"Timer: {timer}")
+    lines.append("Seats:")
     for seat in [seat.value for seat in SEATS]:
         player = seats.get(seat)
         name = player.get("display_name", "-") if isinstance(player, dict) else "-"
@@ -334,6 +338,14 @@ def help_text() -> str:
 def format_client_error(error: GuandanClientError) -> str:
     status = f"HTTP {error.status}: " if error.status is not None else ""
     return f"Error: {status}{error}"
+
+
+def format_timer(snapshot: JsonObject) -> str | None:
+    deadline = snapshot.get("action_deadline_epoch_ms")
+    if not isinstance(deadline, int):
+        return None
+    remaining = max(0, int((deadline - int(time.time() * 1000) + 999) / 1000))
+    return f"{remaining}s remaining"
 
 
 def format_hand(card_ids: object) -> str:

@@ -21,6 +21,7 @@ from guandan.api.schemas import (
     RejectionSchema,
     SeatSnapshotSchema,
     StartMatchRequest,
+    TableCreateRequest,
     TableCreateResponse,
     TableListResponse,
     VersionResponse,
@@ -29,7 +30,7 @@ from guandan.api.websocket import register_websocket_routes
 from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
 from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from guandan.domain.seats import Seat
-from guandan.services.snapshots import public_snapshot, seat_snapshot
+from guandan.services.table_config import TableConfig, TimeoutFallback
 from guandan.services.table_actor import ActorResult, TableActor
 
 
@@ -54,10 +55,19 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
         return VersionResponse(version="0.1.0")
 
     @router.post("/tables", response_model=TableCreateResponse, status_code=201)
-    async def create_table() -> TableCreateResponse:
+    async def create_table(request: TableCreateRequest | None = None) -> TableCreateResponse:
         table_id = f"table-{uuid.uuid4().hex[:12]}"
-        tables[table_id] = TableActor(table_id=table_id)
-        return TableCreateResponse(table_id=table_id)
+        table_request = request or TableCreateRequest()
+        config = TableConfig(
+            action_timeout_seconds=table_request.action_timeout_seconds,
+            timeout_fallback=TimeoutFallback(table_request.timeout_fallback),
+        )
+        tables[table_id] = TableActor(table_id=table_id, config=config)
+        return TableCreateResponse(
+            table_id=table_id,
+            action_timeout_seconds=config.action_timeout_seconds,
+            timeout_fallback=config.timeout_fallback,
+        )
 
     @router.get("/tables", response_model=TableListResponse)
     async def list_tables() -> TableListResponse:
@@ -70,7 +80,7 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
     )
     async def get_table(table_id: str) -> PublicTableSnapshotSchema:
         actor = _actor_or_404(tables, table_id)
-        return PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state))
+        return PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot())
 
     @router.get(
         "/tables/{table_id}/seats/{seat}/snapshot",
@@ -80,7 +90,7 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
     async def get_seat_snapshot(table_id: str, seat: Seat, controller_id: str) -> SeatSnapshotSchema:
         actor = _actor_or_404(tables, table_id)
         try:
-            snapshot = seat_snapshot(actor.state, seat, controller_id)
+            snapshot = actor.seat_snapshot(seat, controller_id)
         except PermissionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return SeatSnapshotSchema.from_snapshot(snapshot)
@@ -233,7 +243,7 @@ def _response_from_result(
     response = CommandResponse(
         events=[EventSchema.from_event(event) for event in result.events],
         event_seq=actor.state.event_seq,
-        snapshot=PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state)),
+        snapshot=PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot()),
         replayed=result.replayed,
     )
     if extra:

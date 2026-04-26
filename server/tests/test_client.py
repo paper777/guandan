@@ -6,6 +6,22 @@ from guandan.client import GuandanHttpClient
 
 
 class ClientTests(unittest.TestCase):
+    def test_create_table_sends_timeout_config(self) -> None:
+        calls = []
+
+        def transport(method, path, body, query):
+            calls.append((method, path, body, query))
+            return {"table_id": "table-1"}
+
+        client = GuandanHttpClient(transport=transport)
+
+        client.create_table(action_timeout_seconds=60, timeout_fallback="auto_pass")
+
+        self.assertEqual(
+            calls,
+            [("POST", "/tables", {"action_timeout_seconds": 60, "timeout_fallback": "auto_pass"}, None)],
+        )
+
     def test_join_human_sends_expected_request(self) -> None:
         calls = []
 

@@ -10,7 +10,7 @@ from urllib.parse import parse_qs
 from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
 from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from guandan.domain.seats import Seat
-from guandan.services.snapshots import public_snapshot, seat_snapshot
+from guandan.services.table_config import TableConfig, TimeoutFallback
 from guandan.services.table_actor import TableActor
 
 
@@ -33,9 +33,26 @@ async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         await _json(send, 200, {"version": "0.1.0"})
         return
     if path == "/tables" and method == "POST":
+        body = await _read_json(receive)
+        if body is None:
+            await _json(send, 400, {"error": "invalid JSON body"})
+            return
+        try:
+            config = _table_config_from_body(body)
+        except ValueError as exc:
+            await _json(send, 400, {"error": str(exc)})
+            return
         table_id = f"table-{uuid.uuid4().hex[:12]}"
-        TABLES[table_id] = TableActor(table_id=table_id)
-        await _json(send, 201, {"table_id": table_id})
+        TABLES[table_id] = TableActor(table_id=table_id, config=config)
+        await _json(
+            send,
+            201,
+            {
+                "table_id": table_id,
+                "action_timeout_seconds": config.action_timeout_seconds,
+                "timeout_fallback": config.timeout_fallback.value,
+            },
+        )
         return
     if path == "/tables" and method == "GET":
         await _json(send, 200, {"tables": list(TABLES)})
@@ -50,7 +67,7 @@ async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
             query = parse_qs(scope.get("query_string", b"").decode())
             controller_id = query.get("controller_id", [""])[0]
             try:
-                snapshot = seat_snapshot(actor.state, seat, controller_id)
+                snapshot = actor.seat_snapshot(seat, controller_id)
             except PermissionError as exc:
                 await _json(send, 400, {"error": str(exc)})
                 return
@@ -61,7 +78,7 @@ async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         if actor is None:
             await _json(send, 404, {"error": "table not found"})
             return
-        await _json(send, 200, public_snapshot(actor.state))
+        await _json(send, 200, actor.public_snapshot())
         return
     if path.startswith("/tables/") and method == "POST":
         actor, action = _table_action(path)
@@ -91,7 +108,7 @@ async def _websocket(scope: dict[str, Any], receive: Any, send: Any) -> None:
         await send({"type": "websocket.close", "code": 1008})
         return
     await send({"type": "websocket.accept"})
-    await _send_ws_json(send, {"type": "snapshot", "payload": public_snapshot(actor.state)})
+    await _send_ws_json(send, {"type": "snapshot", "payload": actor.public_snapshot()})
     while True:
         message = await receive()
         if message["type"] == "websocket.disconnect":
@@ -156,6 +173,13 @@ async def _read_json(receive: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _table_config_from_body(body: dict[str, Any]) -> TableConfig:
+    return TableConfig(
+        action_timeout_seconds=int(body.get("action_timeout_seconds", 45)),
+        timeout_fallback=TimeoutFallback(str(body.get("timeout_fallback", TimeoutFallback.AUTO_PASS.value))),
+    )
+
+
 def _table_action(path: str) -> tuple[TableActor | None, str]:
     parts = [part for part in path.split("/") if part]
     if len(parts) != 3 or parts[0] != "tables":
@@ -181,7 +205,7 @@ def _websocket_table(path: str) -> TableActor | None:
 async def _handle_websocket_message(actor: TableActor, message: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     message_type = str(message.get("type", ""))
     if message_type == "snapshot":
-        return 200, {"snapshot": public_snapshot(actor.state), "event_seq": actor.state.event_seq}
+        return 200, {"snapshot": actor.public_snapshot(), "event_seq": actor.state.event_seq}
     body = dict(message.get("payload", {}))
     if "request_id" in message and "request_id" not in body:
         body["request_id"] = message["request_id"]
@@ -273,7 +297,7 @@ async def _dispatch(
     payload: dict[str, Any] = {
         "events": list(result.events),
         "event_seq": actor.state.event_seq,
-        "snapshot": public_snapshot(actor.state),
+        "snapshot": actor.public_snapshot(),
         "replayed": result.replayed,
     }
     if extra:

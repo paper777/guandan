@@ -18,7 +18,6 @@ from guandan.api.schemas import (
     WebSocketServerMessage,
 )
 from guandan.domain.commands import Pass, PlayCards, Ready, StartMatch
-from guandan.services.snapshots import public_snapshot
 from guandan.services.table_actor import TableActor
 
 
@@ -34,7 +33,7 @@ def register_websocket_routes(app: FastAPI, tables: dict[str, TableActor]) -> No
             websocket,
             WebSocketServerMessage(
                 type="snapshot",
-                payload={"snapshot": PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state))},
+                payload={"snapshot": PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot())},
             ),
         )
         while True:
@@ -54,7 +53,7 @@ def register_websocket_routes(app: FastAPI, tables: dict[str, TableActor]) -> No
 async def _handle_message(actor: TableActor, message: WebSocketClientMessage) -> tuple[int, dict[str, Any]]:
     if message.type == "snapshot":
         return 200, {
-            "snapshot": PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state)),
+            "snapshot": PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot()),
             "event_seq": actor.state.event_seq,
         }
     payload = dict(message.payload)
@@ -105,7 +104,7 @@ async def _handle_message(actor: TableActor, message: WebSocketClientMessage) ->
     response = CommandResponse(
         events=[EventSchema.from_event(event) for event in result.events],
         event_seq=actor.state.event_seq,
-        snapshot=PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state)),
+        snapshot=PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot()),
         replayed=result.replayed,
     )
     return 200, response.model_dump(mode="json")

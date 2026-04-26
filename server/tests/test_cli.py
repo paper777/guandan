@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.cli import format_card_id, run_cli
+from guandan.cli import format_card_id, format_public_snapshot, run_cli
 
 
 class FakeClient:
@@ -123,6 +123,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(format_card_id("D1-S-3"), "♠️ 3")
         self.assertEqual(format_card_id("D2-H-10"), "♥️ 10")
         self.assertEqual(format_card_id("D1-SJ"), "🃏SJ")
+
+    def test_public_snapshot_shows_timer_when_deadline_is_present(self) -> None:
+        output = format_public_snapshot(
+            {
+                "table_id": "table-1",
+                "phase": "PLAYING",
+                "event_seq": 1,
+                "current_turn": "E",
+                "action_deadline_epoch_ms": 9_999_999_999_999,
+                "seats": {},
+                "hand_counts": {},
+                "finish_order": [],
+            }
+        )
+
+        self.assertIn("Timer:", output)
 
 
 if __name__ == "__main__":
