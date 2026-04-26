@@ -71,5 +71,5 @@ def seat_snapshot(state: MatchState, seat: Seat, controller_id: str) -> SeatSnap
     hand = state.deal.hand_for(seat) if state.deal is not None else ()
     legal_action = None
     if state.deal is not None and state.deal.turn == seat and controller.can(ControllerCapability.PLAY):
-        legal_action = "act"
+        legal_action = "lead" if state.deal.current_trick.last_play is None else "play_or_pass"
     return SeatSnapshot(public=public_snapshot(state), seat=seat, hand=hand, legal_action=legal_action)

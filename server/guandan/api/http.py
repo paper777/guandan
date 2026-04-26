@@ -19,6 +19,7 @@ from guandan.api.schemas import (
     ReadyRequest,
     RejectionResponse,
     RejectionSchema,
+    SeatSnapshotSchema,
     StartMatchRequest,
     TableCreateResponse,
     TableListResponse,
@@ -28,7 +29,7 @@ from guandan.api.websocket import register_websocket_routes
 from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
 from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from guandan.domain.seats import Seat
-from guandan.services.snapshots import public_snapshot
+from guandan.services.snapshots import public_snapshot, seat_snapshot
 from guandan.services.table_actor import ActorResult, TableActor
 
 
@@ -70,6 +71,19 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
     async def get_table(table_id: str) -> PublicTableSnapshotSchema:
         actor = _actor_or_404(tables, table_id)
         return PublicTableSnapshotSchema.from_snapshot(public_snapshot(actor.state))
+
+    @router.get(
+        "/tables/{table_id}/seats/{seat}/snapshot",
+        response_model=SeatSnapshotSchema,
+        responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
+    )
+    async def get_seat_snapshot(table_id: str, seat: Seat, controller_id: str) -> SeatSnapshotSchema:
+        actor = _actor_or_404(tables, table_id)
+        try:
+            snapshot = seat_snapshot(actor.state, seat, controller_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SeatSnapshotSchema.from_snapshot(snapshot)
 
     @router.post(
         "/tables/{table_id}/join-human",

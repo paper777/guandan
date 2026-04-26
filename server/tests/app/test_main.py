@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from urllib.parse import urlsplit
 
 from guandan.app.main import TABLES, app
 
@@ -10,6 +11,7 @@ from guandan.app.main import TABLES, app
 async def call_app(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
     messages = []
     request_body = json.dumps(body or {}).encode()
+    parsed = urlsplit(path)
 
     async def receive():
         return {"type": "http.request", "body": request_body, "more_body": False}
@@ -24,9 +26,9 @@ async def call_app(method: str, path: str, body: dict | None = None) -> tuple[in
             "http_version": "1.1",
             "method": method,
             "scheme": "http",
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
+            "path": parsed.path,
+            "raw_path": parsed.path.encode(),
+            "query_string": parsed.query.encode(),
             "headers": [(b"content-type", b"application/json")],
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
@@ -115,6 +117,36 @@ class AppTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([event["type"] for event in body["events"]], ["MatchStarted", "DealStarted", "CardsDealt"])
         self.assertEqual(body["snapshot"]["phase"], "PLAYING")
+
+    def test_private_seat_snapshot_requires_attached_controller(self) -> None:
+        status, body = asyncio.run(call_app("POST", "/tables"))
+        self.assertEqual(status, 201)
+        table_id = body["table_id"]
+
+        for seat in ("E", "S", "W", "N"):
+            status, _ = asyncio.run(
+                call_app(
+                    "POST",
+                    f"/tables/{table_id}/join-human",
+                    {"seat": seat, "player_id": f"p-{seat}", "controller_id": f"c-{seat}"},
+                )
+            )
+            self.assertEqual(status, 200)
+            status, _ = asyncio.run(
+                call_app("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": f"c-{seat}"})
+            )
+            self.assertEqual(status, 200)
+        status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start", {"seed": "fixed-seed"}))
+        self.assertEqual(status, 200)
+
+        status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-E"))
+        self.assertEqual(status, 200)
+        self.assertEqual(body["seat"], "E")
+        self.assertEqual(len(body["hand"]), 27)
+        self.assertEqual(body["legal_action"], "lead")
+
+        status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-S"))
+        self.assertEqual(status, 400)
 
     def test_http_rejection_returns_code(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables"))

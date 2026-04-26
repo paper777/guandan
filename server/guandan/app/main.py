@@ -5,11 +5,12 @@ import uuid
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from typing import Any
+from urllib.parse import parse_qs
 
 from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
 from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from guandan.domain.seats import Seat
-from guandan.services.snapshots import public_snapshot
+from guandan.services.snapshots import public_snapshot, seat_snapshot
 from guandan.services.table_actor import TableActor
 
 
@@ -40,6 +41,21 @@ async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         await _json(send, 200, {"tables": list(TABLES)})
         return
     if path.startswith("/tables/") and method == "GET":
+        seat_request = _seat_snapshot_action(path)
+        if seat_request is not None:
+            actor, seat = seat_request
+            if actor is None:
+                await _json(send, 404, {"error": "table not found"})
+                return
+            query = parse_qs(scope.get("query_string", b"").decode())
+            controller_id = query.get("controller_id", [""])[0]
+            try:
+                snapshot = seat_snapshot(actor.state, seat, controller_id)
+            except PermissionError as exc:
+                await _json(send, 400, {"error": str(exc)})
+                return
+            await _json(send, 200, snapshot)
+            return
         table_id = path.rsplit("/", 1)[-1]
         actor = TABLES.get(table_id)
         if actor is None:
@@ -146,6 +162,13 @@ def _table_action(path: str) -> tuple[TableActor | None, str]:
         return None, ""
     actor = TABLES.get(parts[1])
     return actor, parts[2]
+
+
+def _seat_snapshot_action(path: str) -> tuple[TableActor | None, Seat] | None:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) != 5 or parts[0] != "tables" or parts[2] != "seats" or parts[4] != "snapshot":
+        return None
+    return TABLES.get(parts[1]), Seat(parts[3])
 
 
 def _websocket_table(path: str) -> TableActor | None:
