@@ -148,6 +148,28 @@ class TableActorTests(unittest.TestCase):
         self.assertEqual(actor.state.deal.turn, Seat.NORTH)
         self.assertLess(len(actor.state.deal.hand_for(Seat.EAST)), len(starting_east_hand))
 
+    def test_local_bot_auto_acts_when_prompted(self) -> None:
+        async def run() -> TableActor:
+            actor = TableActor("table-1")
+            await actor.dispatch_async(JoinTable(player(Seat.EAST), local_bot_controller(Seat.EAST), Seat.EAST))
+            for seat in (Seat.NORTH, Seat.WEST, Seat.SOUTH):
+                await actor.dispatch_async(JoinTable(player(seat), controller(seat), seat))
+            for seat in SEATS:
+                await actor.dispatch_async(Ready(actor.state.controllers[seat].id, seat))
+            await actor.dispatch_async(StartMatch(seed="fixed-seed"))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return actor
+
+        actor = asyncio.run(run())
+
+        self.assertIsNotNone(actor.last_npc_result)
+        assert actor.last_npc_result is not None
+        self.assertIsNone(actor.last_npc_result.rejection)
+        self.assertIn("CardsPlayed", [event.type for event in actor.last_npc_result.events])
+        self.assertEqual(actor.state.deal.turn, Seat.NORTH)
+        self.assertEqual(len(actor.state.deal.hand_for(Seat.EAST)), 26)
+
 def player(seat: Seat) -> PlayerRef:
     return PlayerRef(f"p-{seat.value}", seat.value, PlayerKind.HUMAN)
 
@@ -163,6 +185,23 @@ def controller(seat: Seat) -> ControllerRef:
                 ControllerCapability.PLAY,
                 ControllerCapability.OBSERVE_PUBLIC,
                 ControllerCapability.OBSERVE_PRIVATE,
+            }
+        ),
+    )
+
+
+def local_bot_controller(seat: Seat) -> ControllerRef:
+    return ControllerRef(
+        f"bot-c-{seat.value}",
+        ControllerKind.LOCAL_BOT,
+        seat,
+        f"p-{seat.value}",
+        frozenset(
+            {
+                ControllerCapability.PLAY,
+                ControllerCapability.OBSERVE_PUBLIC,
+                ControllerCapability.OBSERVE_PRIVATE,
+                ControllerCapability.AUTO_READY,
             }
         ),
     )

@@ -4,14 +4,16 @@
 
 Architecture notes live in `docs/guandan_server_tech_design.md`.
 
-Planned source layout:
+Source layout:
 
-- `server/`: Python server project root and package configuration.
+- `pyproject.toml`, `uv.lock`: root Python project and uv environment configuration.
+- `server/`: Python server package source.
 - `server/guandan/domain/`: pure Guandan rules engine, state, commands, events, scoring, and tribute logic.
 - `server/guandan/controllers/`: human, local bot, and external AI agent controller adapters.
 - `server/guandan/api/`: FastAPI HTTP and WebSocket schemas/routes.
 - `server/guandan/services/`: table actor, lobby, replay, and snapshot filtering.
 - `server/guandan/persistence/`: SQLite models and repositories.
+- `npc/`: external NPC policy, broker, and shared client/server helpers.
 - `server/tests/`: unit, property, and integration tests mirroring source modules.
 
 Keep rule logic independent from web, SQLite, and wall-clock time.
@@ -21,14 +23,16 @@ Keep rule logic independent from web, SQLite, and wall-clock time.
 Key commands:
 
 - `python -m venv .venv && source .venv/bin/activate`: create and enter a local virtual environment.
-- `pip install -e "server[dev]"`: install the server package with development dependencies.
-- `cd server && uv sync --dev`: create/update the uv-managed virtual environment from `pyproject.toml` and `uv.lock`.
-- `cd server && python3 -m unittest discover -s tests`: run the no-dependency test suite.
-- `cd server && uv run python -m unittest discover -s tests`: run tests through the uv-managed environment.
-- `pytest`: run the full test suite after installing `server[dev]`.
+- `pip install -e ".[dev]"`: install the server and NPC packages with development dependencies.
+- `uv sync --dev`: create/update the uv-managed virtual environment from root `pyproject.toml` and `uv.lock`.
+- `python3 -m unittest discover -s server/tests`: run the no-dependency server test suite.
+- `python3 -m unittest discover -s npc`: run the no-dependency NPC test suite.
+- `uv run python -m unittest discover -s server/tests`: run server tests through the uv-managed environment.
+- `uv run python -m unittest discover -s npc`: run NPC tests through the uv-managed environment.
+- `pytest`: run the full test suite after installing `.[dev]`.
 - `pytest server/tests/domain`: run rule-engine tests.
-- `cd server && uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
-- `cd server && uv run uvicorn guandan.app.main:app --reload`: run the local API server directly with uvicorn.
+- `uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
+- `uv run uvicorn guandan.app.main:app --reload`: run the local API server directly with uvicorn.
 
 Document any command changes in this file when tooling is introduced.
 

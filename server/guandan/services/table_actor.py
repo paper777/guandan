@@ -9,6 +9,7 @@ from typing import Literal
 from guandan.domain.cards import CARD_BY_ID, Rank, is_red_heart_level_card
 from guandan.domain.commands import Command, Pass, PlayCards, ReturnTribute, SubmitTribute
 from guandan.domain.comparator import RankContext
+from guandan.domain.controllers import ControllerKind
 from guandan.domain.events import CommandRejected, Event, RejectCode
 from guandan.domain.reducer import reduce_command
 from guandan.domain.seats import Seat, partner_for_seat
@@ -17,6 +18,8 @@ from guandan.persistence.sqlite_store import SQLiteEventStore
 from guandan.services.replay import rebuild_state_from_events
 from guandan.services.snapshots import PublicTableSnapshot, SeatSnapshot, public_snapshot, seat_snapshot
 from guandan.services.table_config import TableConfig, TimeoutFallback
+from npc.common.client import ActionRequest, JsonObject
+from npc.dummy_bot.policy import DummyBotPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +75,9 @@ class TableActor:
         self._lock = asyncio.Lock()
         self._active_prompt: ActivePrompt | None = None
         self._timeout_task: asyncio.Task[None] | None = None
+        self._npc_task: asyncio.Task[None] | None = None
         self.last_timeout_result: ActorResult | None = None
+        self.last_npc_result: ActorResult | None = None
         if self.event_store is not None:
             self.event_store.create_match(self.match_id, table_id)
             events = self.event_store.load_events(self.match_id)
@@ -133,6 +138,7 @@ class TableActor:
 
     def close(self) -> None:
         self._cancel_timeout_task()
+        self._cancel_npc_task()
 
     def _dispatch_locked(
         self,
@@ -174,14 +180,18 @@ class TableActor:
         if requirement is None:
             self._active_prompt = None
             self._cancel_timeout_task()
+            self._cancel_npc_task()
             return ()
 
         if self._active_prompt is not None and self._active_prompt.prompt_id == requirement.prompt_id:
             if schedule_timeout and self._timeout_task is None:
                 self._schedule_timeout_task()
+            if schedule_timeout and self._npc_task is None:
+                self._schedule_npc_task()
             return ()
 
         self._cancel_timeout_task()
+        self._cancel_npc_task()
         started = self._clock()
         deadline = started + (self.config.action_timeout_seconds * 1000)
         self._active_prompt = ActivePrompt(
@@ -194,6 +204,7 @@ class TableActor:
         )
         if schedule_timeout:
             self._schedule_timeout_task()
+            self._schedule_npc_task()
         if not emit_prompt_event:
             return ()
         return (self._service_event("ActionPrompted", self._prompt_payload(self._active_prompt)),)
@@ -210,6 +221,20 @@ class TableActor:
             self._timeout_task.cancel()
         self._timeout_task = None
 
+    def _schedule_npc_task(self) -> None:
+        if self._active_prompt is None:
+            return
+        controller = self.state.controllers.get(self._active_prompt.seat)
+        if controller is None or controller.kind != ControllerKind.LOCAL_BOT:
+            return
+        self._npc_task = asyncio.create_task(self._run_npc_after(self._active_prompt.prompt_id))
+
+    def _cancel_npc_task(self) -> None:
+        current = _current_task_or_none()
+        if self._npc_task is not None and not self._npc_task.done() and self._npc_task is not current:
+            self._npc_task.cancel()
+        self._npc_task = None
+
     async def _timeout_after(self, prompt_id: str, delay: float) -> None:
         try:
             await self._sleeper(delay)
@@ -219,6 +244,30 @@ class TableActor:
             if self._timeout_task is asyncio.current_task():
                 self._timeout_task = None
             self.last_timeout_result = self._apply_timeout_locked(prompt_id)
+
+    async def _run_npc_after(self, prompt_id: str) -> None:
+        await asyncio.sleep(0)
+        async with self._lock:
+            if self._npc_task is asyncio.current_task():
+                self._npc_task = None
+            prompt = self._active_prompt
+            if prompt is None or prompt.prompt_id != prompt_id:
+                self.last_npc_result = ActorResult(events=())
+                return
+            controller = self.state.controllers.get(prompt.seat)
+            if controller is None or controller.kind != ControllerKind.LOCAL_BOT:
+                self.last_npc_result = ActorResult(events=())
+                return
+            command = self._npc_command(prompt, controller.id)
+            if command is None:
+                self.last_npc_result = ActorResult(events=())
+                return
+            self.last_npc_result = self._dispatch_locked(
+                command,
+                controller_id=controller.id,
+                request_id=f"npc:{prompt.prompt_id}",
+                schedule_timeout=True,
+            )
 
     def _apply_timeout_locked(self, prompt_id: str) -> ActorResult:
         prompt = self._active_prompt
@@ -289,6 +338,29 @@ class TableActor:
             return ReturnTribute(controller.id, prompt.seat, card_id) if card_id is not None else None
         return None
 
+    def _npc_command(self, prompt: ActivePrompt, controller_id: str) -> Command | None:
+        snapshot = self.seat_snapshot(prompt.seat, controller_id)
+        action = DummyBotPolicy().choose_action(
+            ActionRequest(
+                request_id=prompt.prompt_id,
+                prompt={
+                    "kind": prompt.kind,
+                    "current_level": self.state.current_level.value,
+                    "return_rank_at_most_ten": _return_to_partner_required(self.state, prompt.seat),
+                },
+                snapshot={
+                    "table_id": snapshot.public.table_id,
+                    "seat": prompt.seat.value,
+                    "hand": list(snapshot.hand),
+                    "public": {
+                        "event_seq": snapshot.public.event_seq,
+                        "current_turn": snapshot.public.current_turn.value if snapshot.public.current_turn else None,
+                    },
+                },
+            )
+        )
+        return _command_from_npc_action(action, controller_id, prompt.seat)
+
     def _service_event(self, event_type: str, payload: dict[str, object]) -> Event:
         next_seq = self.state.event_seq + 1
         self.state = self.state.bump_seq()
@@ -306,6 +378,13 @@ class TableActor:
 
 def _system_epoch_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _current_task_or_none() -> asyncio.Task[object] | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
 
 
 def _prompt_requirement(state: MatchState) -> PromptRequirement | None:
@@ -360,6 +439,36 @@ def _smallest_return_card(state: MatchState, seat: Seat) -> str | None:
     if partner_for_seat(seat) == obligation.giver:
         hand = tuple(card_id for card_id in hand if _rank_at_most_ten(card_id))
     return _min_card(hand, state.current_level)
+
+
+def _return_to_partner_required(state: MatchState, seat: Seat) -> bool:
+    if state.deal is None or state.deal.tribute is None:
+        return False
+    obligation = next(
+        (
+            item
+            for item in state.deal.tribute.obligations
+            if item.receiver == seat and item.tribute_card_id is not None and item.return_card_id is None
+        ),
+        None,
+    )
+    return obligation is not None and partner_for_seat(seat) == obligation.giver
+
+
+def _command_from_npc_action(action: JsonObject, controller_id: str, seat: Seat) -> Command | None:
+    action_type = action.get("type")
+    if action_type == "pass":
+        return Pass(controller_id, seat)
+    if action_type == "play_cards":
+        card_ids = tuple(str(card_id) for card_id in action.get("card_ids", ()))
+        return PlayCards(controller_id, seat, card_ids) if card_ids else None
+    if action_type == "submit_tribute":
+        card_id = action.get("card_id")
+        return SubmitTribute(controller_id, seat, str(card_id)) if card_id is not None else None
+    if action_type == "return_tribute":
+        card_id = action.get("card_id")
+        return ReturnTribute(controller_id, seat, str(card_id)) if card_id is not None else None
+    return None
 
 
 def _min_card(card_ids: tuple[str, ...], level: Rank) -> str | None:

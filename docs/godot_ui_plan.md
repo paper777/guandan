@@ -62,8 +62,8 @@ The server remains authoritative. The Godot client renders snapshots and submits
 
 ## Test Plan
 
-- Run existing server tests with `cd server && uv run python -m unittest discover -s tests`.
-- Start the server with `cd server && uv run guandan-server --reload`.
+- Run existing server tests with `uv run python -m unittest discover -s server/tests`.
+- Start the server with `uv run guandan-server --reload`.
 - Open the Godot project from `ui/` and verify:
   - A client can create or join a table.
   - A human can join a chosen seat and receive `player_id` and `controller_id`.

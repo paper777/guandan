@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guandan-server"
+version = "0.1.0"
+description = "Authoritative Python server foundation for Guandan."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.scripts]
+guandan-cli = "guandan.cli:main"
+guandan-server = "guandan.server:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6",
+]
+api = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "hypothesis>=6",
+]
+
+[tool.setuptools]
+packages = [
+  "guandan",
+  "guandan.api",
+  "guandan.app",
+  "guandan.controllers",
+  "guandan.domain",
+  "guandan.persistence",
+  "guandan.services",
+  "npc",
+  "npc.broker",
+  "npc.common",
+  "npc.dummy_bot",
+]
+
+[tool.setuptools.package-dir]
+guandan = "server/guandan"
+"guandan.api" = "server/guandan/api"
+"guandan.app" = "server/guandan/app"
+"guandan.controllers" = "server/guandan/controllers"
+"guandan.domain" = "server/guandan/domain"
+"guandan.persistence" = "server/guandan/persistence"
+"guandan.services" = "server/guandan/services"
+npc = "npc"
+"npc.broker" = "npc/broker"
+"npc.common" = "npc/common"
+"npc.dummy_bot" = "npc/dummy_bot"
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests", "npc"]
+pythonpath = ["server", "."]
