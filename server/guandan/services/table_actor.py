@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from guandan.domain.commands import Command
@@ -7,6 +8,7 @@ from guandan.domain.events import CommandRejected, Event
 from guandan.domain.reducer import reduce_command
 from guandan.domain.state import MatchState
 from guandan.persistence.sqlite_store import SQLiteEventStore
+from guandan.services.replay import rebuild_state_from_events
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,8 +29,22 @@ class TableActor:
         self.match_id = match_id or table_id
         self.state = MatchState(table_id=table_id)
         self.event_store = event_store
+        self._lock = asyncio.Lock()
         if self.event_store is not None:
             self.event_store.create_match(self.match_id, table_id)
+            events = self.event_store.load_events(self.match_id)
+            if events:
+                self.state = rebuild_state_from_events(table_id, events)
+
+    async def dispatch_async(
+        self,
+        command: Command,
+        *,
+        controller_id: str | None = None,
+        request_id: str | None = None,
+    ) -> ActorResult:
+        async with self._lock:
+            return self.dispatch(command, controller_id=controller_id, request_id=request_id)
 
     def dispatch(
         self,

@@ -18,7 +18,7 @@ from guandan.domain.commands import (
 from guandan.domain.comparator import RankContext, can_beat
 from guandan.domain.controllers import ControllerCapability
 from guandan.domain.events import CommandRejected, Event, ReducerResult, RejectCode
-from guandan.domain.hand_types import parse_hand
+from guandan.domain.hand_types import AmbiguousHandError, parse_hand
 from guandan.domain.seats import SEATS, Seat, next_seat, partner_for_seat, team_for_seat
 from guandan.domain.state import DealResult, DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
 
@@ -59,7 +59,19 @@ def _join_table(state: MatchState, command: JoinTable) -> ReducerResult:
     return ReducerResult(
         state=next_state,
         events=(
-            _event(next_state, "PlayerSeated", {"seat": seat.value, "player_id": command.player.id}),
+            _event(
+                next_state,
+                "PlayerSeated",
+                {
+                    "seat": seat.value,
+                    "player": {
+                        "id": command.player.id,
+                        "display_name": command.player.display_name,
+                        "kind": command.player.kind.value,
+                    },
+                    "controller": _controller_payload(command.controller),
+                },
+            ),
         ),
     )
 
@@ -73,7 +85,13 @@ def _attach_controller(state: MatchState, command: AttachController) -> ReducerR
     next_state = replace(state.bump_seq(), controllers=controllers)
     return ReducerResult(
         state=next_state,
-        events=(_event(next_state, "ControllerAttached", {"seat": seat.value, "controller_id": command.controller.id}),),
+        events=(
+            _event(
+                next_state,
+                "ControllerAttached",
+                {"seat": seat.value, "controller": _controller_payload(command.controller)},
+            ),
+        ),
     )
 
 
@@ -118,12 +136,13 @@ def _start_match(state: MatchState, command: StartMatch) -> ReducerResult:
         turn=leader,
         current_trick=TrickState(lead_seat=leader),
     )
-    next_state = replace(state.bump_seq(2), phase=MatchPhase.PLAYING, deal=deal)
+    next_state = replace(state.bump_seq(3), phase=MatchPhase.PLAYING, deal=deal)
     return ReducerResult(
         state=next_state,
         events=(
-            Event(seq=next_state.event_seq - 1, type="MatchStarted", payload={"table_id": state.table_id}),
-            Event(seq=next_state.event_seq, type="DealStarted", payload={"leader": leader.value}),
+            Event(seq=next_state.event_seq - 2, type="MatchStarted", payload={"table_id": state.table_id}),
+            Event(seq=next_state.event_seq - 1, type="DealStarted", payload={"leader": leader.value}),
+            Event(seq=next_state.event_seq, type="CardsDealt", payload=_hands_payload(hands_by_seat)),
         ),
     )
 
@@ -144,26 +163,29 @@ def _start_next_deal(state: MatchState, command: StartMatch) -> ReducerResult:
         tribute=None if tribute.resisted else tribute,
     )
     if tribute.resisted:
-        next_state = replace(state.bump_seq(2), phase=MatchPhase.PLAYING, deal=deal)
+        next_state = replace(state.bump_seq(3), phase=MatchPhase.PLAYING, deal=deal)
         return ReducerResult(
             state=next_state,
             events=(
-                Event(seq=next_state.event_seq - 1, type="DealStarted", payload={"leader": leader.value}),
+                Event(seq=next_state.event_seq - 2, type="DealStarted", payload={"leader": leader.value}),
+                Event(seq=next_state.event_seq - 1, type="CardsDealt", payload=_hands_payload(hands_by_seat)),
                 Event(seq=next_state.event_seq, type="TributeResisted", payload={"leader": leader.value}),
             ),
         )
-    next_state = replace(state.bump_seq(2), phase=MatchPhase.TRIBUTE, deal=deal)
+    next_state = replace(state.bump_seq(3), phase=MatchPhase.TRIBUTE, deal=deal)
     return ReducerResult(
         state=next_state,
         events=(
-            Event(seq=next_state.event_seq - 1, type="DealStarted", payload={"leader": leader.value}),
+            Event(seq=next_state.event_seq - 2, type="DealStarted", payload={"leader": leader.value}),
+            Event(seq=next_state.event_seq - 1, type="CardsDealt", payload=_hands_payload(hands_by_seat)),
             Event(
                 seq=next_state.event_seq,
                 type="TributeRequired",
                 payload={
                     "obligations": [
                         {"giver": item.giver.value, "receiver": item.receiver.value} for item in tribute.obligations
-                    ]
+                    ],
+                    "leader_after": tribute.leader_after.value,
                 },
             ),
         ),
@@ -233,16 +255,16 @@ def _return_tribute(state: MatchState, command: ReturnTribute) -> ReducerResult:
         turn=tribute.leader_after if complete else state.deal.turn,
         current_trick=TrickState(lead_seat=tribute.leader_after) if complete else state.deal.current_trick,
     )
-    next_state = replace(state.bump_seq(), phase=MatchPhase.PLAYING if complete else state.phase, deal=deal)
-    events = [
-        _event(
-            next_state,
+    event_specs: list[tuple[str, dict[str, object]]] = [
+        (
             "TributeReturned",
             {"giver": obligation.giver.value, "receiver": command.seat.value, "card_id": command.card_id},
         )
     ]
     if complete:
-        events.append(_event(next_state, "TributeComplete", {"leader": tribute.leader_after.value}))
+        event_specs.append(("TributeComplete", {"leader": tribute.leader_after.value}))
+    next_state = replace(state.bump_seq(len(event_specs)), phase=MatchPhase.PLAYING if complete else state.phase, deal=deal)
+    events = _events_from_specs(state.event_seq, event_specs)
     return ReducerResult(state=next_state, events=tuple(events))
 
 
@@ -259,6 +281,8 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
         return _reject(state, RejectCode.CARD_NOT_OWNED, "one or more cards are not in the seat's hand")
     try:
         played_hand = parse_hand(resolve_cards(command.card_ids), command.declared_type, level=state.current_level)
+    except AmbiguousHandError as exc:
+        return _reject(state, RejectCode.AMBIGUOUS_WILD_CARD_DECLARATION, str(exc))
     except ValueError as exc:
         return _reject(state, RejectCode.INVALID_HAND_TYPE, str(exc))
     if not can_beat(played_hand, state.deal.current_trick.last_play, state.current_level):
@@ -269,11 +293,16 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
     hands[command.seat] = tuple(hand)
     active = set(state.deal.active_seats)
     finish_order = list(state.deal.finish_order)
-    if not hand:
+    finished = not hand
+    if finished:
         active.remove(command.seat)
         finish_order.append(command.seat)
     completion = _completed_finish_order(tuple(finish_order), frozenset(active))
     next_turn = next_seat(command.seat, active) if active else command.seat
+    reported_10 = len(hand) <= 10 and command.seat not in state.deal.report_10_done
+    report_10_done = (
+        frozenset({*state.deal.report_10_done, command.seat}) if reported_10 else state.deal.report_10_done
+    )
     trick = replace(
         state.deal.current_trick,
         last_play=played_hand,
@@ -287,11 +316,10 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
         finish_order=completion if completion is not None else tuple(finish_order),
         turn=next_turn,
         current_trick=trick,
+        report_10_done=report_10_done,
     )
-    next_state = replace(state.bump_seq(), deal=deal)
-    events = [
-        _event(
-            next_state,
+    event_specs: list[tuple[str, dict[str, object]]] = [
+        (
             "CardsPlayed",
             {
                 "seat": command.seat.value,
@@ -301,6 +329,13 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
             },
         )
     ]
+    if reported_10:
+        event_specs.append(("TenCardReport", {"seat": command.seat.value, "remaining_count": len(hand)}))
+    if finished:
+        event_specs.append(("PlayerFinished", {"seat": command.seat.value, "position": len(finish_order)}))
+
+    next_state = replace(state.bump_seq(len(event_specs)), deal=deal)
+    events = list(_events_from_specs(state.event_seq, event_specs))
     if completion is not None:
         completed = _complete_deal(next_state, completion)
         next_state = completed.state
@@ -480,9 +515,7 @@ def _pass(state: MatchState, command: Pass) -> ReducerResult:
         return _reject(state, RejectCode.CANNOT_PASS_WHEN_LEADING, "leading seat cannot pass")
     active = state.deal.active_seats
     pass_count = state.deal.current_trick.pass_count + 1
-    events: list[Event] = []
-    next_state = state.bump_seq()
-    events.append(_event(next_state, "PlayerPassed", {"seat": command.seat.value}))
+    event_specs: list[tuple[str, dict[str, object]]] = [("PlayerPassed", {"seat": command.seat.value})]
     required_passes = len(active) - 1 if state.deal.current_trick.last_play_seat in active else len(active)
     if pass_count >= max(required_passes, 1):
         leader = state.deal.current_trick.last_play_seat
@@ -490,11 +523,18 @@ def _pass(state: MatchState, command: Pass) -> ReducerResult:
         next_leader = _leader_after_trick(leader, active)
         trick = TrickState(lead_seat=next_leader)
         deal = replace(state.deal, leader=next_leader, turn=next_leader, current_trick=trick)
+        event_specs.append(
+            (
+                "TrickEnded",
+                {"last_play_seat": leader.value, "next_leader": next_leader.value},
+            )
+        )
     else:
         trick = replace(state.deal.current_trick, pass_count=pass_count)
         deal = replace(state.deal, turn=next_seat(command.seat, active), current_trick=trick)
-    next_state = replace(next_state, deal=deal)
-    return ReducerResult(state=next_state, events=tuple(events))
+    next_state = replace(state.bump_seq(len(event_specs)), deal=deal)
+    events = _events_from_specs(state.event_seq, event_specs)
+    return ReducerResult(state=next_state, events=events)
 
 
 def _require_controller(
@@ -526,3 +566,24 @@ def _reject(state: MatchState, code: RejectCode, message: str) -> ReducerResult:
 
 def _event(state: MatchState, event_type: str, payload: dict[str, object]) -> Event:
     return Event(seq=state.event_seq, type=event_type, payload=payload)
+
+
+def _events_from_specs(start_seq: int, specs: list[tuple[str, dict[str, object]]]) -> tuple[Event, ...]:
+    return tuple(
+        Event(seq=start_seq + index, type=event_type, payload=payload)
+        for index, (event_type, payload) in enumerate(specs, start=1)
+    )
+
+
+def _hands_payload(hands_by_seat: dict[Seat, tuple[str, ...]]) -> dict[str, object]:
+    return {"hands": {seat.value: list(hand) for seat, hand in hands_by_seat.items()}}
+
+
+def _controller_payload(controller: object) -> dict[str, object]:
+    return {
+        "id": controller.id,
+        "kind": controller.kind.value,
+        "seat": controller.seat.value,
+        "player_id": controller.player_id,
+        "capabilities": sorted(capability.value for capability in controller.capabilities),
+    }

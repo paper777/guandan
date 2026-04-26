@@ -22,10 +22,13 @@ Key commands:
 
 - `python -m venv .venv && source .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e "server[dev]"`: install the server package with development dependencies.
+- `cd server && uv sync --dev`: create/update the uv-managed virtual environment from `pyproject.toml` and `uv.lock`.
 - `cd server && python3 -m unittest discover -s tests`: run the no-dependency test suite.
+- `cd server && uv run python -m unittest discover -s tests`: run tests through the uv-managed environment.
 - `pytest`: run the full test suite after installing `server[dev]`.
 - `pytest server/tests/domain`: run rule-engine tests.
-- `cd server && uvicorn guandan.app.main:app --reload`: run the local API server.
+- `cd server && uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
+- `cd server && uv run uvicorn guandan.app.main:app --reload`: run the local API server directly with uvicorn.
 
 Document any command changes in this file when tooling is introduced.
 

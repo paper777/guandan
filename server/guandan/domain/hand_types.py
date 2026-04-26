@@ -21,6 +21,10 @@ class HandType(StrEnum):
     FOUR_JOKERS = "four_jokers"
 
 
+class AmbiguousHandError(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class PlayedHand:
     card_ids: tuple[str, ...]
@@ -64,7 +68,7 @@ def parse_hand(cards: tuple[Card, ...], declared_type: str | None = None, level:
     if len(candidates) > 1 and declared_type is not None:
         return max(candidates, key=lambda hand: _rank_sort_value(hand.primary_rank, level))
     if len(candidates) > 1 and declared_type is None:
-        raise ValueError("hand is ambiguous; declared_type is required")
+        raise AmbiguousHandError("hand is ambiguous; declared_type is required")
     return candidates[0]
 
 

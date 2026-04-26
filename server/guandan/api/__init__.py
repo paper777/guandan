@@ -1,1 +1,1 @@
-"""HTTP and WebSocket API modules."""
+"""FastAPI route modules and Pydantic API schemas."""

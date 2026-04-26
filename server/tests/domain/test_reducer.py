@@ -48,13 +48,27 @@ def started_state() -> MatchState:
 
 class ReducerTests(unittest.TestCase):
     def test_start_match_deals_cards_and_enters_playing(self) -> None:
-        state = started_state()
+        state = MatchState(table_id="table-1")
+        for seat in SEATS:
+            result = reduce_command(state, JoinTable(player(seat), controller(seat), seat))
+            assert result.rejection is None
+            state = result.state
+        for seat in SEATS:
+            result = reduce_command(state, Ready(controller(seat).id, seat))
+            assert result.rejection is None
+            state = result.state
+        result = reduce_command(state, StartMatch(seed="fixed-seed"))
+        self.assertIsNone(result.rejection)
+        state = result.state
 
         self.assertEqual(state.phase, MatchPhase.PLAYING)
         self.assertIsNotNone(state.deal)
         assert state.deal is not None
         self.assertEqual([len(state.deal.hand_for(seat)) for seat in SEATS], [27, 27, 27, 27])
         self.assertEqual(state.deal.turn, Seat.EAST)
+        self.assertEqual([event.type for event in result.events], ["MatchStarted", "DealStarted", "CardsDealt"])
+        self.assertEqual(set(result.events[-1].payload["hands"]), {seat.value for seat in SEATS})
+        self.assertEqual(len(result.events[-1].payload["hands"][Seat.EAST.value]), 27)
 
     def test_rejects_play_from_unattached_controller(self) -> None:
         state = started_state()
@@ -95,6 +109,72 @@ class ReducerTests(unittest.TestCase):
         assert state.deal is not None
         self.assertEqual(state.deal.turn, Seat.EAST)
         self.assertIsNone(state.deal.current_trick.last_play_seat)
+        self.assertEqual(result.events[-1].type, "TrickEnded")
+        self.assertEqual([event.seq for event in result.events], list(range(result.events[0].seq, result.events[-1].seq + 1)))
+
+    def test_play_emits_ten_card_report_once(self) -> None:
+        state = started_state()
+        state = self._give_hands(
+            state,
+            {
+                Seat.EAST: ("D1-S-A", "D1-S-3"),
+                Seat.NORTH: ("D1-S-4",),
+                Seat.WEST: ("D1-S-5",),
+                Seat.SOUTH: ("D1-S-6",),
+            },
+        )
+
+        result = reduce_command(state, PlayCards(controller(Seat.EAST).id, Seat.EAST, ("D1-S-A",)))
+
+        self.assertIsNone(result.rejection)
+        self.assertIn("TenCardReport", [event.type for event in result.events])
+        self.assertEqual([event.seq for event in result.events], list(range(result.events[0].seq, result.events[-1].seq + 1)))
+        state = result.state
+        assert state.deal is not None
+        self.assertIn(Seat.EAST, state.deal.report_10_done)
+
+    def test_play_emits_player_finished(self) -> None:
+        state = started_state()
+        state = self._give_hands(
+            state,
+            {
+                Seat.EAST: ("D1-S-A",),
+                Seat.NORTH: ("D1-S-4",),
+                Seat.WEST: ("D1-S-5",),
+                Seat.SOUTH: ("D1-S-6",),
+            },
+        )
+
+        result = reduce_command(state, PlayCards(controller(Seat.EAST).id, Seat.EAST, ("D1-S-A",)))
+
+        self.assertIsNone(result.rejection)
+        self.assertEqual([event.type for event in result.events], ["CardsPlayed", "TenCardReport", "PlayerFinished"])
+        self.assertEqual(result.events[-1].payload["position"], 1)
+
+    def test_rejects_ambiguous_hand_without_declaration(self) -> None:
+        state = started_state()
+        state = self._give_hands(
+            state,
+            {
+                Seat.EAST: ("D1-S-3", "D1-S-4", "D1-S-5", "D1-S-6", "D1-S-7"),
+                Seat.NORTH: ("D1-S-8",),
+                Seat.WEST: ("D1-S-9",),
+                Seat.SOUTH: ("D1-S-10",),
+            },
+        )
+
+        result = reduce_command(
+            state,
+            PlayCards(
+                controller(Seat.EAST).id,
+                Seat.EAST,
+                ("D1-S-3", "D1-S-4", "D1-S-5", "D1-S-6", "D1-S-7"),
+            ),
+        )
+
+        self.assertIsNotNone(result.rejection)
+        assert result.rejection is not None
+        self.assertEqual(result.rejection.code, RejectCode.AMBIGUOUS_WILD_CARD_DECLARATION)
 
     def test_finished_player_final_trick_lead_borrows_to_partner(self) -> None:
         state = started_state()

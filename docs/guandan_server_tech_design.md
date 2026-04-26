@@ -803,30 +803,89 @@ Metrics:
 - Audit controller attachment, detachment, timeout fallback, and takeover events.
 - Keep replay/audit logs for dispute review.
 
-## Implementation Plan
+## Current Implementation Status
 
-1. Create the pure domain model: cards, ranks, seats, teams, phases, commands, events, players, and controllers.
-2. Implement deck generation, deterministic shuffle, deal, and public/seat snapshot filtering.
-3. Implement hand parser without wild cards.
-4. Add level-card rank context and red-heart wild-card parsing.
-5. Implement hand comparison and bomb hierarchy.
-6. Implement reducer for play/pass/trick/finish/deal-end flow.
-7. Implement tribute and return flow.
-8. Implement level progression and match completion.
-9. Add controller protocol interfaces and a deterministic local bot policy.
-10. Add FastAPI HTTP and human WebSocket shell.
-11. Add table actor, in-memory repository, and scripted mixed-controller integration tests.
-12. Add external AI agent callback protocol and timeout fallback.
-13. Add SQLite event persistence and replay rebuild.
-14. Add basic lobby and reconnect/reattach behavior.
+Implemented or partially implemented:
 
-## Open Questions
+- Core domain models for cards, seats, controllers, commands, events, match state, deal state, and score state.
+- Standard two-deck generation, deterministic shuffle/deal, rank comparison, hand parsing with red-heart level-card wildcards, and bomb hierarchy.
+- Reducer support for joining, readying, starting, play/pass flow, trick completion, borrowed wind, deal completion, level advancement, and basic tribute/return.
+- Reducer events for card deals, 10-card reports, player finishes, trick ends, tribute completion, and ambiguous wildcard rejection.
+- Seat-filtered public/private snapshots, a deterministic simple bot policy, and an external agent HTTP payload client.
+- Optional FastAPI route modules and Pydantic schemas for health, version, table creation/listing, public table snapshots, join/ready/start/play/pass commands, and a basic WebSocket command/snapshot endpoint.
+- Minimal no-dependency ASGI fallback that preserves the same basic HTTP/WebSocket behavior when `server[api]` is not installed.
+- SQLite event persistence for matches, match events, and idempotency keys, wired through `TableActor.dispatch`.
+- Event-log replay rebuild for the currently implemented event set, wired into event-backed `TableActor` initialization.
+- Async serialized `TableActor.dispatch_async` entrypoint for API/WebSocket callers.
+- Cryptographically random unseeded shuffle source, while preserving deterministic seeded deals for tests.
+- Unit tests for core cards, hand types, comparator behavior, reducer flow, snapshots, table actor idempotency/restart, SQLite event storage, replay rebuild, simple policy, external agent payloads, CLI, and app basics.
 
-- Should the first product support only the 2017 Huai'an competition rules, or also common local variants?
-- Should the first API support anonymous guest players, authenticated accounts, or both?
-- Should table state be recoverable after every command from day one, or can persistence start after the pure engine is stable?
-- Should 10-card reporting be purely automatic, or should clients display it as a visible player action?
-- Should tournament scoring from the source be phase-two only, or required for the first release?
-- Should external AI agents receive server-computed legal action hints, or only raw snapshots?
-- Should a human be allowed to take over a bot or agent seat mid-match, and under what table settings?
-- Should local bot policy be part of production deployment or only test/development support?
+Still missing or incomplete:
+
+- Full human WebSocket gameplay with controller authentication, private seat snapshots, broadcast fan-out, reconnect, and backpressure handling.
+- Controller prompting, action deadlines, and timeout fallback.
+- Full `ActionPrompt` models and server-computed legal action hints.
+- Complete persistence schema for tables, players, controllers, deal results, and visibility metadata.
+- Full tribute edge-case coverage and rejected-command audit persistence.
+- Property tests and mixed-controller integration tests.
+- Lobby, reconnect, reattach, human takeover settings, logging, metrics, rate limits, and production audit handling.
+
+## TODO Roadmap
+
+### Domain Rules
+
+- Add table-driven tests for red-heart wildcard parsing across pair, triple, full house, straight, straight flush, connected pairs, connected triples, and bombs.
+- Expand tribute tests before changing behavior: normal tribute resistance, double tribute resistance, double-tribute ordering, highest-card ties, red-heart level-card exclusion, partner return rank limit, and leader selection after tribute.
+- Verify and test `A` / `A+` match-end rules, including the condition that the first finisher's partner must not be last.
+- Add rejected-command audit events if rejected commands become part of the persisted audit stream.
+
+### Controller and Actor Layer
+
+- Add `ActionPrompt` and prompt generation for `lead`, `play_or_pass`, `tribute`, and `return_tribute`.
+- Route human, local bot, and external agent commands through the same actor queue and reducer validation path.
+- Let `SimpleBotPolicy` consume prompts and legal hints instead of blindly playing the first card.
+- Add external agent response validation, request deadline handling, late-response ignoring, and configured fallback actions (`auto_pass` first, `simple_bot_takeover` later).
+- Broadcast accepted events and fresh snapshots after every accepted command without letting slow clients block the actor.
+
+### API Layer
+
+- Expand FastAPI coverage for controller attachment/detachment, private seat snapshots, and replay responses.
+- Implement HTTP endpoints for leave, detach, private seat snapshots, and match replay.
+- Expand `GET /ws/tables/{table_id}` beyond the current basic shell to include authenticated private snapshots, event broadcast, and reconnect snapshot refresh.
+- Preserve the minimal `/health` and `/version` behavior when replacing the current ASGI shell.
+
+### Persistence and Replay
+
+- Expand SQLite schema to include tables, players, controllers, table lifecycle, match metadata, deal results, event visibility, and private deal/audit payloads.
+- Persist accepted command event batches transactionally before broadcasting.
+- Keep event replay rebuild complete as new event types are introduced.
+- Add replay APIs that return public replay data and never leak hidden card information before the match/deal visibility policy allows it.
+- Keep idempotency scoped by match, controller, and request ID, and test that duplicate commands never mutate state twice.
+
+### Testing
+
+- Add Hypothesis invariants for card conservation, no duplicate cards, legal ownership, accepted-play hand deltas, controller seat isolation, replay determinism, and hidden snapshot privacy.
+- Add reducer tests for every rejection code listed in the error model.
+- Add service tests for actor serialization, prompt generation, timeout fallback, slow-client-safe broadcasting, and event-store transaction boundaries.
+- Add API integration tests for four WebSocket clients completing a scripted deal, reconnect behavior, duplicate request IDs, mixed human/local-bot/external-agent seats, invalid agent responses, and restart-from-event-log.
+- Keep the no-dependency unittest suite runnable with `cd server && python3 -m unittest discover -s tests`; gate FastAPI/Hypothesis coverage behind `server[dev]` where needed.
+
+### Operations and Security
+
+- Add structured command logs with table, match, player, controller, command type, prior sequence, resulting event range, latency, and rejection code.
+- Add metrics hooks for active tables, connections, bot/agent seats, command latency, reducer latency, SQLite write latency, rejection counts, agent timeouts, and reconnects.
+- Store production shuffle seed material only in private audit data until disclosure is allowed.
+- Add command rate limits per connection, player, controller, and external agent endpoint.
+- Authenticate or sign external agent callbacks and make `DEBUG_FULL_STATE` impossible to enable for production or external-agent controllers.
+- Add hidden-information regression checks for logs, snapshots, bot prompts, agent payloads, replay output, and persisted public events.
+
+## Implementation Defaults and Deferred Decisions
+
+- Phase one targets only the 2017 Huai'an competition rules described in this document. Common local variants are deferred until the core rule engine and tests are stable.
+- The first API should support anonymous or guest players. Authenticated accounts can be added after lobby and reconnect semantics are working.
+- State should be recoverable from persisted events before any non-local deployment. During pure engine development, in-memory state plus tests remains acceptable.
+- 10-card reporting is automatic server behavior, emitted as a public event; clients may display it but do not submit it as an action.
+- Tournament scoring, referee penalties, appeals, and venue administration stay phase two.
+- External agents should receive server-computed legal action hints once hints exist, while still being validated like every other controller.
+- Human takeover of bot or agent seats is deferred behind an explicit table setting and audit event.
+- Local bot policy is part of development, testing, and optional private deployment; production use should be configurable per table.

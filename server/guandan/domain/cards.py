@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from random import Random
+from secrets import token_bytes
 from typing import Iterable
 
 
@@ -79,7 +80,7 @@ CARD_BY_ID: dict[str, Card] = {card.id: card for card in DECK}
 
 def shuffled_deck(seed: str | int | bytes | None = None) -> tuple[Card, ...]:
     deck = list(DECK)
-    Random(seed).shuffle(deck)
+    Random(token_bytes(32) if seed is None else seed).shuffle(deck)
     return tuple(deck)
 
 
