@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build a desktop-first Godot 4.6 playable MVP under `ui/`. The client connects to the existing FastAPI Guandan server and supports create, join, ready, start, play, pass, public table display, private hand display for the controlled seat, card selection, countdown display, and server rejection feedback.
+Build a desktop-first Godot 4.6 playable MVP under `ui/`. The client connects to the existing FastAPI Guandan server and supports create, join, fill remaining seats with default local bots, ready, start, play, pass, public table display, private hand display for the controlled seat, card selection, countdown display, and server rejection feedback.
 
 The server remains authoritative. The Godot client renders snapshots and submits commands; it does not implement Guandan rule validation.
 
@@ -21,6 +21,7 @@ The server remains authoritative. The Godot client renders snapshots and submits
   - `POST /tables/{table_id}/pass`
 - Store local session state in memory: `base_url`, `table_id`, `seat`, `player_id`, `controller_id`, selected card IDs, and latest snapshot.
 - Render MVP cards from card IDs such as `D1-H-10` and `D2-BJ` as readable text/suit tiles; no card-art package is required.
+- Add default local bots through the existing `POST /tables/{table_id}/join-local-bot` endpoint and mark each bot ready after it joins.
 
 ## UI Flow
 
@@ -29,9 +30,10 @@ The server remains authoritative. The Godot client renders snapshots and submits
   - Create table, refresh tables, and join table actions.
   - Seat picker for `E`, `S`, `W`, `N`.
   - Display name input.
+  - Default-on option to fill the other three seats with local bots after the human joins.
 - Lobby screen:
   - Four-seat layout showing occupied seats, names, player kinds, and controlled status.
-  - Ready, start match, and refresh actions.
+  - Ready, start match, refresh, and fill-empty-seats-with-bots actions.
   - If public ready-state is not exposed by the server, rely on command response/rejection instead of inventing local truth.
 - Game screen:
   - Table layout with the controlled player at the bottom.

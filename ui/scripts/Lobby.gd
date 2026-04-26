@@ -82,6 +82,11 @@ func _build_ui() -> void:
 	refresh_button.pressed.connect(_refresh_snapshot)
 	actions.add_child(refresh_button)
 
+	var fill_bots_button := Button.new()
+	fill_bots_button.text = "Fill Bots"
+	fill_bots_button.pressed.connect(_on_fill_bots_pressed)
+	actions.add_child(fill_bots_button)
+
 	var leave_button := Button.new()
 	leave_button.text = "Leave Local Session"
 	leave_button.pressed.connect(func(): leave_table.emit())
@@ -146,3 +151,33 @@ func _on_start_pressed() -> void:
 	session.update_from_command_response(result["data"])
 	status_label.text = "Match started."
 	open_game.emit()
+
+
+func _on_fill_bots_pressed() -> void:
+	status_label.text = "Adding default bots..."
+	var snapshot_result = await api.table_snapshot(session.table_id)
+	if not snapshot_result.get("ok", false):
+		status_label.text = snapshot_result.get("error", "snapshot failed")
+		return
+	var seats: Dictionary = snapshot_result["data"].get("seats", {})
+	var joined_count := 0
+	for seat in ["E", "S", "W", "N"]:
+		if seats.has(seat):
+			continue
+		var result = await api.join_local_bot(session.table_id, seat, "Bot %s" % seat)
+		if result.get("ok", false):
+			joined_count += 1
+			var controller_id := str(result["data"].get("controller_id", ""))
+			if controller_id != "":
+				var ready_result = await api.ready(session.table_id, seat, controller_id)
+				if not ready_result.get("ok", false):
+					status_label.text = "Bot %s joined, but ready failed: %s" % [
+						seat,
+						ready_result.get("error", "ready failed")
+					]
+					return
+		else:
+			status_label.text = "Bot %s failed: %s" % [seat, result.get("error", "bot join failed")]
+			return
+	status_label.text = "Added %s default bot(s)." % joined_count
+	await _refresh_snapshot()

@@ -38,6 +38,14 @@ func join_human(table_id: String, seat: String, display_name: String) -> Diction
 	)
 
 
+func join_local_bot(table_id: String, seat: String, display_name: String) -> Dictionary:
+	return await request_json(
+		"POST",
+		"/tables/%s/join-local-bot" % table_id.uri_encode(),
+		{"seat": seat, "display_name": display_name}
+	)
+
+
 func ready(table_id: String, seat: String, controller_id: String) -> Dictionary:
 	return await request_json(
 		"POST",

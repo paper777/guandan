@@ -10,6 +10,7 @@ var table_id_edit: LineEdit
 var table_list: OptionButton
 var seat_picker: OptionButton
 var display_name_edit: LineEdit
+var fill_bots_check: CheckBox
 var status_label: Label
 var join_button: Button
 
@@ -77,6 +78,11 @@ func _build_ui() -> void:
 	display_name_edit = LineEdit.new()
 	display_name_edit.placeholder_text = "Display name"
 	root.add_child(_field("Name", display_name_edit))
+
+	fill_bots_check = CheckBox.new()
+	fill_bots_check.text = "Fill other seats with default bots"
+	fill_bots_check.button_pressed = true
+	root.add_child(fill_bots_check)
 
 	join_button = Button.new()
 	join_button.text = "Join Human Seat"
@@ -157,4 +163,35 @@ func _on_join_pressed() -> void:
 		return
 	session.update_from_command_response(result["data"])
 	status_label.text = "Joined %s as %s" % [session.table_id, session.seat]
+	if fill_bots_check.button_pressed:
+		await _fill_remaining_bot_seats()
 	joined_table.emit()
+
+
+func _fill_remaining_bot_seats() -> void:
+	var snapshot_result = await api.table_snapshot(session.table_id)
+	if not snapshot_result.get("ok", false):
+		status_label.text = "Joined, but bot fill failed: %s" % snapshot_result.get("error", "snapshot failed")
+		return
+
+	var seats: Dictionary = snapshot_result["data"].get("seats", {})
+	var joined_count := 0
+	for seat in ["E", "S", "W", "N"]:
+		if seat == session.seat or seats.has(seat):
+			continue
+		var result = await api.join_local_bot(session.table_id, seat, "Bot %s" % seat)
+		if result.get("ok", false):
+			joined_count += 1
+			var controller_id := str(result["data"].get("controller_id", ""))
+			if controller_id != "":
+				var ready_result = await api.ready(session.table_id, seat, controller_id)
+				if not ready_result.get("ok", false):
+					status_label.text = "Bot %s joined, but ready failed: %s" % [
+						seat,
+						ready_result.get("error", "ready failed")
+					]
+					return
+		else:
+			status_label.text = "Joined, but bot %s failed: %s" % [seat, result.get("error", "bot join failed")]
+			return
+	status_label.text = "Joined %s as %s; added %s bot(s)." % [session.table_id, session.seat, joined_count]
