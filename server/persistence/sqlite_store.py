@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
-from guandan.domain.events import Event
+from server.domain.events import Event
 
 
 class SQLiteEventStore:

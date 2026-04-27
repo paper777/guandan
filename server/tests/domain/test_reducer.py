@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
-from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
-from guandan.domain.events import RejectCode
-from guandan.domain.reducer import reduce_command
-from guandan.domain.cards import Rank
-from guandan.domain.seats import SEATS, Seat, Team
-from guandan.domain.state import DealResult, MatchPhase, MatchState
+from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
+from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
+from server.domain.events import RejectCode
+from server.domain.reducer import reduce_command
+from server.domain.cards import Rank
+from server.domain.seats import SEATS, Seat, Team
+from server.domain.state import DealResult, MatchPhase, MatchState
 
 
 def player(seat: Seat) -> PlayerRef:

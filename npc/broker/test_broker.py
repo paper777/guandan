@@ -35,6 +35,14 @@ class FakeClient:
         self.calls.append(("pass_turn", table_id, seat, controller_id))
         return {}
 
+    def submit_tribute(self, table_id, seat, controller_id, card_id):
+        self.calls.append(("submit_tribute", table_id, seat, controller_id, card_id))
+        return {}
+
+    def return_tribute(self, table_id, seat, controller_id, card_id):
+        self.calls.append(("return_tribute", table_id, seat, controller_id, card_id))
+        return {}
+
 
 class NpcBrokerTests(unittest.TestCase):
     def test_join_ready_and_poll_submit_are_owned_by_broker(self) -> None:
@@ -53,6 +61,33 @@ class NpcBrokerTests(unittest.TestCase):
                 ("ready", "table-1", "S", "c-S"),
                 ("seat_snapshot", "table-1", "S", "c-S"),
                 ("play_cards", "table-1", "S", "c-S", ("D1-S-3",)),
+            ],
+        )
+
+    def test_poll_uses_acting_seat_for_tribute_prompt(self) -> None:
+        class TributeClient(FakeClient):
+            def seat_snapshot(self, table_id, seat, controller_id):
+                self.calls.append(("seat_snapshot", table_id, seat, controller_id))
+                return {
+                    "public": {"current_turn": "E", "acting_seat": seat, "event_seq": 9, "current_level": "2"},
+                    "seat": seat,
+                    "hand": ["D1-H-2", "D1-S-A", "D1-S-3"],
+                    "legal_action": "tribute",
+                }
+
+        client = TributeClient()
+        broker = NpcBroker(client, "table-1")
+        seat = broker.add_seat("S", DummyBotPolicy(), "Dummy S")
+        seat.controller_id = "c-S"
+
+        actions = broker.poll_once()
+
+        self.assertEqual(actions, [{"type": "submit_tribute", "card_id": "D1-S-A"}])
+        self.assertEqual(
+            client.calls,
+            [
+                ("seat_snapshot", "table-1", "S", "c-S"),
+                ("submit_tribute", "table-1", "S", "c-S", "D1-S-A"),
             ],
         )
 

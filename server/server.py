@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 
-DEFAULT_APP = "guandan.app.main:app"
+DEFAULT_APP = "server.app.main:app"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ModuleNotFoundError as exc:
         if exc.name != "uvicorn":
             raise
-        raise SystemExit("uvicorn is not installed; run `uv sync` in the server directory.") from exc
+        raise SystemExit("uvicorn is not installed; run `uv sync` from the repository root.") from exc
 
     uvicorn.run(
         options.app,

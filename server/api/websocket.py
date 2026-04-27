@@ -5,20 +5,22 @@ from typing import Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from guandan.api.schemas import (
+from server.api.schemas import (
     CommandResponse,
     EventSchema,
     PassRequest,
     PlayCardsRequest,
     PublicTableSnapshotSchema,
     ReadyRequest,
+    ReturnTributeRequest,
     RejectionSchema,
     StartMatchRequest,
+    SubmitTributeRequest,
     WebSocketClientMessage,
     WebSocketServerMessage,
 )
-from guandan.domain.commands import Pass, PlayCards, Ready, StartMatch
-from guandan.services.table_actor import TableActor
+from server.domain.commands import Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
+from server.services.table_actor import TableActor
 
 
 def register_websocket_routes(app: FastAPI, tables: dict[str, TableActor]) -> None:
@@ -90,6 +92,20 @@ async def _handle_message(actor: TableActor, message: WebSocketClientMessage) ->
         request = PassRequest.model_validate(payload)
         result = await actor.dispatch_async(
             Pass(request.controller_id, request.seat),
+            controller_id=request.controller_id,
+            request_id=request.request_id,
+        )
+    elif message.type == "submit_tribute":
+        request = SubmitTributeRequest.model_validate(payload)
+        result = await actor.dispatch_async(
+            SubmitTribute(request.controller_id, request.seat, request.card_id),
+            controller_id=request.controller_id,
+            request_id=request.request_id,
+        )
+    elif message.type == "return_tribute":
+        request = ReturnTributeRequest.model_validate(payload)
+        result = await actor.dispatch_async(
+            ReturnTribute(request.controller_id, request.seat, request.card_id),
             controller_id=request.controller_id,
             request_id=request.request_id,
         )

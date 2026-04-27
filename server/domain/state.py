@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from guandan.domain.cards import Rank
-from guandan.domain.controllers import ControllerRef, PlayerRef
-from guandan.domain.hand_types import PlayedHand
-from guandan.domain.seats import SEATS, Seat, Team
+from server.domain.cards import Rank
+from server.domain.controllers import ControllerRef, PlayerRef
+from server.domain.hand_types import PlayedHand
+from server.domain.seats import SEATS, Seat, Team
 
 
 class MatchPhase(StrEnum):

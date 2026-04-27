@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [project.scripts]
-guandan-cli = "guandan.cli:main"
-guandan-server = "guandan.server:main"
+guandan-cli = "client.cli:main"
+guandan-server = "server.server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -34,13 +34,14 @@ dev = [
 
 [tool.setuptools]
 packages = [
-  "guandan",
-  "guandan.api",
-  "guandan.app",
-  "guandan.controllers",
-  "guandan.domain",
-  "guandan.persistence",
-  "guandan.services",
+  "client",
+  "server",
+  "server.api",
+  "server.app",
+  "server.controllers",
+  "server.domain",
+  "server.persistence",
+  "server.services",
   "npc",
   "npc.broker",
   "npc.common",
@@ -48,13 +49,14 @@ packages = [
 ]
 
 [tool.setuptools.package-dir]
-guandan = "server/guandan"
-"guandan.api" = "server/guandan/api"
-"guandan.app" = "server/guandan/app"
-"guandan.controllers" = "server/guandan/controllers"
-"guandan.domain" = "server/guandan/domain"
-"guandan.persistence" = "server/guandan/persistence"
-"guandan.services" = "server/guandan/services"
+client = "client"
+server = "server"
+"server.api" = "server/api"
+"server.app" = "server/app"
+"server.controllers" = "server/controllers"
+"server.domain" = "server/domain"
+"server.persistence" = "server/persistence"
+"server.services" = "server/services"
 npc = "npc"
 "npc.broker" = "npc/broker"
 "npc.common" = "npc/common"
@@ -62,4 +64,4 @@ npc = "npc"
 
 [tool.pytest.ini_options]
 testpaths = ["server/tests", "npc"]
-pythonpath = ["server", "."]
+pythonpath = ["."]

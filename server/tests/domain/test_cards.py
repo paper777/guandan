@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.domain.cards import CARD_BY_ID, DECK, Rank, Suit, deal_cards, is_red_heart_level_card, resolve_cards
+from server.domain.cards import CARD_BY_ID, DECK, Rank, Suit, deal_cards, is_red_heart_level_card, resolve_cards
 
 
 class CardTests(unittest.TestCase):

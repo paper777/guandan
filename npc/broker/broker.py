@@ -4,7 +4,7 @@ import argparse
 import time
 from dataclasses import dataclass
 
-from npc.common.client import ActionRequest, GuandanNpcClient, JsonObject, NpcPolicy
+from client.api import ActionRequest, GuandanNpcClient, JsonObject, NpcPolicy
 from npc.dummy_bot.policy import DummyBotPolicy
 
 
@@ -46,13 +46,17 @@ class NpcBroker:
             snapshot = self.client.seat_snapshot(self.table_id, broker_seat.seat, broker_seat.controller_id)
             public = snapshot.get("public", {})
             legal_action = snapshot.get("legal_action")
-            if legal_action is None or public.get("current_turn") != broker_seat.seat:
+            acting_seat = public.get("acting_seat") or public.get("current_turn")
+            if legal_action is None or acting_seat != broker_seat.seat:
                 continue
 
             action = broker_seat.policy.choose_action(
                 ActionRequest(
                     request_id=f"{self.table_id}:{broker_seat.seat}:{public.get('event_seq', 0)}",
-                    prompt={"kind": legal_action},
+                    prompt={
+                        "kind": legal_action,
+                        "current_level": public.get("current_level", "2"),
+                    },
                     snapshot={
                         "table_id": self.table_id,
                         "seat": broker_seat.seat,
@@ -77,6 +81,20 @@ class NpcBroker:
         if action_type == "play_cards":
             card_ids = tuple(str(card_id) for card_id in action.get("card_ids", []))
             return self.client.play_cards(self.table_id, broker_seat.seat, broker_seat.controller_id, card_ids)
+        if action_type == "submit_tribute":
+            return self.client.submit_tribute(
+                self.table_id,
+                broker_seat.seat,
+                broker_seat.controller_id,
+                str(action["card_id"]),
+            )
+        if action_type == "return_tribute":
+            return self.client.return_tribute(
+                self.table_id,
+                broker_seat.seat,
+                broker_seat.controller_id,
+                str(action["card_id"]),
+            )
         raise ValueError(f"unsupported NPC action: {action_type}")
 
 

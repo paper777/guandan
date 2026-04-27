@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -17,6 +17,46 @@ class GuandanClientError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.payload = payload or {}
+
+
+NpcClientError = GuandanClientError
+
+
+@dataclass(frozen=True, slots=True)
+class ActionRequest:
+    request_id: str
+    prompt: JsonObject
+    snapshot: JsonObject
+
+    @classmethod
+    def from_payload(cls, payload: JsonObject) -> "ActionRequest":
+        return cls(
+            request_id=str(payload.get("request_id", "")),
+            prompt=_dict(payload.get("prompt")),
+            snapshot=_dict(payload.get("snapshot")),
+        )
+
+
+class NpcPolicy(Protocol):
+    def choose_action(self, request: ActionRequest) -> JsonObject:
+        """Return a command-like action for the broker or HTTP agent server."""
+
+
+@dataclass(slots=True)
+class JsonHttpClient:
+    base_url: str
+    timeout: float = 10.0
+    transport: Transport | None = None
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: JsonObject | None = None,
+        *,
+        query: JsonObject | None = None,
+    ) -> JsonObject:
+        return _request_json(self.base_url, self.timeout, self.transport, method, path, body, query)
 
 
 @dataclass(slots=True)
@@ -91,6 +131,36 @@ class GuandanHttpClient:
             display_name=display_name,
         )
 
+    def join_agent(
+        self,
+        table_id: str,
+        seat: str,
+        display_name: str,
+        *,
+        player_id: str | None = None,
+        controller_id: str | None = None,
+        agent_url: str | None = None,
+        timeout_ms: int | None = None,
+        timeout_fallback: str | None = None,
+        shared_secret: str | None = None,
+    ) -> JsonObject:
+        return self._request(
+            "POST",
+            f"/tables/{table_id}/join-agent",
+            _without_none(
+                {
+                    "seat": seat,
+                    "player_id": player_id,
+                    "controller_id": controller_id,
+                    "display_name": display_name,
+                    "agent_url": agent_url,
+                    "timeout_ms": timeout_ms,
+                    "timeout_fallback": timeout_fallback,
+                    "shared_secret": shared_secret,
+                }
+            ),
+        )
+
     def ready(self, table_id: str, seat: str, controller_id: str) -> JsonObject:
         return self._request("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": controller_id})
 
@@ -121,6 +191,20 @@ class GuandanHttpClient:
 
     def pass_turn(self, table_id: str, seat: str, controller_id: str) -> JsonObject:
         return self._request("POST", f"/tables/{table_id}/pass", {"seat": seat, "controller_id": controller_id})
+
+    def submit_tribute(self, table_id: str, seat: str, controller_id: str, card_id: str) -> JsonObject:
+        return self._request(
+            "POST",
+            f"/tables/{table_id}/tribute",
+            {"seat": seat, "controller_id": controller_id, "card_id": card_id},
+        )
+
+    def return_tribute(self, table_id: str, seat: str, controller_id: str, card_id: str) -> JsonObject:
+        return self._request(
+            "POST",
+            f"/tables/{table_id}/return-tribute",
+            {"seat": seat, "controller_id": controller_id, "card_id": card_id},
+        )
 
     def _join(
         self,
@@ -153,26 +237,38 @@ class GuandanHttpClient:
         *,
         query: JsonObject | None = None,
     ) -> JsonObject:
-        if self.transport is not None:
-            return self.transport(method, path, body, query)
+        return _request_json(self.base_url, self.timeout, self.transport, method, path, body, query)
 
-        data = None
-        headers = {"Accept": "application/json"}
-        if body is not None:
-            data = json.dumps(body).encode()
-            headers["Content-Type"] = "application/json"
-        url = urljoin(self.base_url.rstrip("/") + "/", path.lstrip("/"))
-        if query:
-            url = f"{url}?{urlencode(query)}"
-        request = Request(url, data=data, headers=headers, method=method)
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                return _decode_response(response.read())
-        except HTTPError as exc:
-            payload = _decode_response(exc.read())
-            raise GuandanClientError(exc.code, _error_message(payload), payload) from exc
-        except URLError as exc:
-            raise GuandanClientError(None, f"could not connect to Guandan server: {exc.reason}") from exc
+
+def _request_json(
+    base_url: str,
+    timeout: float,
+    transport: Transport | None,
+    method: str,
+    path: str,
+    body: JsonObject | None = None,
+    query: JsonObject | None = None,
+) -> JsonObject:
+    if transport is not None:
+        return transport(method, path, body, query)
+
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    if query:
+        url = f"{url}?{urlencode(query)}"
+    request = Request(url, data=data, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return _decode_response(response.read())
+    except HTTPError as exc:
+        payload = _decode_response(exc.read())
+        raise GuandanClientError(exc.code, _error_message(payload), payload) from exc
+    except URLError as exc:
+        raise GuandanClientError(None, f"could not connect to Guandan server: {exc.reason}") from exc
 
 
 def _decode_response(raw: bytes) -> JsonObject:
@@ -201,3 +297,10 @@ def _error_message(payload: JsonObject) -> str:
 
 def _without_none(payload: JsonObject) -> JsonObject:
     return {key: value for key, value in payload.items() if value is not None}
+
+
+def _dict(value: Any) -> JsonObject:
+    return value if isinstance(value, dict) else {}
+
+
+GuandanNpcClient = GuandanHttpClient

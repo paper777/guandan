@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from guandan.domain.controllers import ControllerKind, ControllerRef, PlayerRef
-from guandan.domain.seats import Seat
+from server.domain.controllers import ControllerKind, ControllerRef, PlayerRef
+from server.domain.seats import Seat
 
 
 @dataclass(frozen=True, slots=True)

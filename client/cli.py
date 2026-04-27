@@ -7,8 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
-from guandan.client import GuandanClientError, GuandanHttpClient, JsonObject
-from guandan.domain.seats import SEATS
+from client.api import GuandanClientError, GuandanHttpClient, JsonObject
+from server.domain.seats import SEATS
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
@@ -39,7 +39,7 @@ OutputFn = Callable[[str], None]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    result = run_cli(argv, input_fn=input, output_fn=sys.stdout.write)
+    result = run_cli(sys.argv[1:] if argv is None else argv, input_fn=input, output_fn=sys.stdout.write)
     return result.exit_code
 
 

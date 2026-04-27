@@ -7,11 +7,11 @@ from enum import Enum
 from typing import Any
 from urllib.parse import parse_qs
 
-from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
-from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
-from guandan.domain.seats import Seat
-from guandan.services.table_config import TableConfig, TimeoutFallback
-from guandan.services.table_actor import TableActor
+from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
+from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
+from server.domain.seats import Seat
+from server.services.table_config import TableConfig, TimeoutFallback
+from server.services.table_actor import TableActor
 
 
 TABLES: dict[str, TableActor] = {}
@@ -214,6 +214,8 @@ async def _handle_websocket_message(actor: TableActor, message: dict[str, Any]) 
         "start": "start",
         "play_cards": "play",
         "pass": "pass",
+        "submit_tribute": "tribute",
+        "return_tribute": "return-tribute",
     }.get(message_type)
     if action is None:
         raise ValueError(f"unsupported websocket message type: {message_type}")
@@ -240,6 +242,26 @@ async def _handle_table_action(actor: TableActor, action: str, body: dict[str, A
         )
     if action == "pass":
         return await _dispatch(actor, Pass(controller_id=str(body["controller_id"]), seat=Seat(body["seat"])), body)
+    if action == "tribute":
+        return await _dispatch(
+            actor,
+            SubmitTribute(
+                controller_id=str(body["controller_id"]),
+                seat=Seat(body["seat"]),
+                card_id=str(body["card_id"]),
+            ),
+            body,
+        )
+    if action == "return-tribute":
+        return await _dispatch(
+            actor,
+            ReturnTribute(
+                controller_id=str(body["controller_id"]),
+                seat=Seat(body["seat"]),
+                card_id=str(body["card_id"]),
+            ),
+            body,
+        )
     raise ValueError(f"unsupported table action: {action}")
 
 
@@ -306,7 +328,7 @@ async def _dispatch(
 
 
 try:
-    from guandan.api.http import create_app as _create_fastapi_app
+    from server.api.http import create_app as _create_fastapi_app
 except ModuleNotFoundError as exc:
     if exc.name not in {"fastapi", "pydantic"}:
         raise

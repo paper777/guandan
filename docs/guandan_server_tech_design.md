@@ -105,43 +105,48 @@ The rule engine must not depend on FastAPI, SQLite, or wall-clock time. It shoul
 ## Package Layout
 
 ```text
+client/
+  api.py
+  cli.py
 server/
-  guandan/
-    api/
-      http.py
-      websocket.py
-      schemas.py
-    app/
-      config.py
-      main.py
-    domain/
-      cards.py
-      hand_types.py
-      hand_parser.py
-      comparator.py
-      state.py
-      commands.py
-      events.py
-      reducer.py
-      scoring.py
-      tribute.py
-    services/
-      table_actor.py
-      lobby.py
-      replay_store.py
-      snapshot_filter.py
-    controllers/
-      base.py
-      human.py
-      local_bot.py
-      external_agent.py
-      simple_policy.py
-    persistence/
-      models.py
-      repositories.py
+  api/
+    http.py
+    websocket.py
+    schemas.py
+  app/
+    config.py
+    main.py
+  domain/
+    cards.py
+    hand_types.py
+    hand_parser.py
+    comparator.py
+    state.py
+    commands.py
+    events.py
+    reducer.py
+    scoring.py
+    tribute.py
+  services/
+    table_actor.py
+    lobby.py
+    replay_store.py
+    snapshot_filter.py
+  controllers/
+    base.py
+    human.py
+    external_agent.py
+    simple_policy.py
+  persistence/
+    models.py
+    repositories.py
   tests/
     domain/
     api/
+npc/
+  broker/
+  common/
+  dummy_bot/
 ```
 
 ## Domain Model

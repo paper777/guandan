@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from guandan.domain.seats import Seat
+from server.domain.seats import Seat
 
 
 class PlayerKind(StrEnum):

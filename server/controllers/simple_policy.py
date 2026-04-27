@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from guandan.domain.commands import Pass, PlayCards
-from guandan.domain.seats import Seat
-from guandan.services.snapshots import SeatSnapshot
+from server.domain.commands import Pass, PlayCards
+from server.domain.seats import Seat
+from server.services.snapshots import SeatSnapshot
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,11 +8,11 @@ The server remains authoritative. The bot only proposes normal domain commands, 
 
 ## Layout
 
-- `npc/common/client.py`: shared NPC protocol objects plus generic HTTP and Guandan table clients.
+- `client/`: shared CLI, Guandan table HTTP client, and NPC protocol request types.
 - `npc/common/server.py`: generic HTTP policy server helper.
 - `npc/dummy_bot`: dummy behavior only, plus a thin runner that hosts the policy through `npc/common.server`.
 - `npc/broker`: owns all client/server interaction with the Guandan table API for out-of-process NPCs.
-- `server/guandan`: imports the repository-level `npc` package through the root uv project.
+- `server/`: contains only the authoritative game server and no NPC actor runtime.
 
 ## Behavior
 
@@ -25,10 +25,8 @@ The server remains authoritative. The bot only proposes normal domain commands, 
 ## Integration
 
 - Out-of-process policies must not call the Guandan table API directly; the broker joins seats, polls snapshots, and submits actions.
-- In-server local bots reuse the repository-level `npc.dummy_bot.policy` and convert policy action dictionaries to domain commands inside `TableActor`.
-- `TableActor` schedules a zero-delay NPC task whenever the active prompt belongs to a `LOCAL_BOT` controller.
-- NPC actions are serialized through the actor lock and dispatched through the existing reducer path.
-- The actor stores the most recent NPC result in `last_npc_result` for tests and debugging.
+- `TableActor` does not run NPC policy. It only exposes snapshots, accepts commands, and applies timeout fallback.
+- The broker serializes NPC decisions externally by polling snapshots and submitting normal table API commands.
 
 ## Non-Goals
 

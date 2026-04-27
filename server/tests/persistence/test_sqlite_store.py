@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from guandan.domain.events import Event
-from guandan.persistence.sqlite_store import SQLiteEventStore
+from server.domain.events import Event
+from server.persistence.sqlite_store import SQLiteEventStore
 
 
 class SQLiteEventStoreTests(unittest.TestCase):

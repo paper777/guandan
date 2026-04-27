@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
-from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
-from guandan.domain.events import Event
-from guandan.domain.seats import SEATS, Seat
-from guandan.services.replay import rebuild_state_from_events
-from guandan.services.table_actor import TableActor
+from server.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
+from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
+from server.domain.events import Event
+from server.domain.seats import SEATS, Seat
+from server.services.replay import rebuild_state_from_events
+from server.services.table_actor import TableActor
 
 
 class ReplayTests(unittest.TestCase):

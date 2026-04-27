@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.controllers.external_agent import ExternalAgentClient
-from guandan.domain.seats import Seat
-from guandan.domain.state import MatchPhase
-from guandan.services.snapshots import PublicTableSnapshot, SeatSnapshot
+from server.controllers.external_agent import ExternalAgentClient
+from server.domain.seats import Seat
+from server.domain.state import MatchPhase
+from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
 
 class ExternalAgentClientTests(unittest.TestCase):

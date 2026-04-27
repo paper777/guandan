@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from guandan.api.schemas import (
+from server.api.schemas import (
     AgentJoinRequest,
     CommandResponse,
     ErrorResponse,
@@ -17,21 +17,23 @@ from guandan.api.schemas import (
     PlayCardsRequest,
     PublicTableSnapshotSchema,
     ReadyRequest,
+    ReturnTributeRequest,
     RejectionResponse,
     RejectionSchema,
     SeatSnapshotSchema,
     StartMatchRequest,
+    SubmitTributeRequest,
     TableCreateRequest,
     TableCreateResponse,
     TableListResponse,
     VersionResponse,
 )
-from guandan.api.websocket import register_websocket_routes
-from guandan.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
-from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
-from guandan.domain.seats import Seat
-from guandan.services.table_config import TableConfig, TimeoutFallback
-from guandan.services.table_actor import ActorResult, TableActor
+from server.api.websocket import register_websocket_routes
+from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
+from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
+from server.domain.seats import Seat
+from server.services.table_config import TableConfig, TimeoutFallback
+from server.services.table_actor import ActorResult, TableActor
 
 
 def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
@@ -164,6 +166,32 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
     async def pass_turn(table_id: str, request: PassRequest) -> CommandResponse | JSONResponse:
         actor = _actor_or_404(tables, table_id)
         return await _command_response(actor, Pass(request.controller_id, request.seat), request)
+
+    @router.post(
+        "/tables/{table_id}/tribute",
+        response_model=CommandResponse,
+        responses={400: {"model": RejectionResponse}, 404: {"model": ErrorResponse}},
+    )
+    async def submit_tribute(table_id: str, request: SubmitTributeRequest) -> CommandResponse | JSONResponse:
+        actor = _actor_or_404(tables, table_id)
+        return await _command_response(
+            actor,
+            SubmitTribute(request.controller_id, request.seat, request.card_id),
+            request,
+        )
+
+    @router.post(
+        "/tables/{table_id}/return-tribute",
+        response_model=CommandResponse,
+        responses={400: {"model": RejectionResponse}, 404: {"model": ErrorResponse}},
+    )
+    async def return_tribute(table_id: str, request: ReturnTributeRequest) -> CommandResponse | JSONResponse:
+        actor = _actor_or_404(tables, table_id)
+        return await _command_response(
+            actor,
+            ReturnTribute(request.controller_id, request.seat, request.card_id),
+            request,
+        )
 
     return router
 

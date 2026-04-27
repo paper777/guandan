@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from guandan.domain.seats import Seat
+from server.domain.seats import Seat
 
 
 class RejectCode(StrEnum):

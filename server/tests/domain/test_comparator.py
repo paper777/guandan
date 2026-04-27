@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.domain.cards import CARD_BY_ID, Rank
-from guandan.domain.comparator import RankContext, can_beat
-from guandan.domain.hand_types import parse_hand
+from server.domain.cards import CARD_BY_ID, Rank
+from server.domain.comparator import RankContext, can_beat
+from server.domain.hand_types import parse_hand
 
 
 def hand(*ids: str, declared_type: str | None = None):

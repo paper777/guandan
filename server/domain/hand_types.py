@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from itertools import product
 
-from guandan.domain.cards import STANDARD_RANKS, Card, Rank, Suit, is_red_heart_level_card
+from server.domain.cards import STANDARD_RANKS, Card, Rank, Suit, is_red_heart_level_card
 
 
 class HandType(StrEnum):

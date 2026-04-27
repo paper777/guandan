@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from guandan.domain.controllers import ControllerCapability
-from guandan.domain.seats import Seat
-from guandan.domain.state import MatchPhase, MatchState
+from server.domain.cards import Rank
+from server.domain.controllers import ControllerCapability
+from server.domain.seats import Seat
+from server.domain.state import MatchPhase, MatchState
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,7 @@ class PublicTableSnapshot:
     current_turn: Seat | None
     finish_order: tuple[Seat, ...]
     event_seq: int
+    current_level: Rank = Rank.TWO
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None
@@ -66,6 +68,7 @@ def public_snapshot(
         seats=seats,
         hand_counts=hand_counts,
         current_turn=current_turn,
+        current_level=state.current_level,
         finish_order=finish_order,
         event_seq=state.event_seq,
         action_deadline_epoch_ms=action_deadline_epoch_ms,
@@ -90,8 +93,23 @@ def seat_snapshot(
         raise PermissionError("controller cannot observe private seat state")
     hand = state.deal.hand_for(seat) if state.deal is not None else ()
     legal_action = None
-    if state.deal is not None and state.deal.turn == seat and controller.can(ControllerCapability.PLAY):
-        legal_action = "lead" if state.deal.current_trick.last_play is None else "play_or_pass"
+    if state.deal is not None and controller.can(ControllerCapability.PLAY):
+        if state.phase == MatchPhase.PLAYING and state.deal.turn == seat:
+            legal_action = "lead" if state.deal.current_trick.last_play is None else "play_or_pass"
+        elif state.phase == MatchPhase.TRIBUTE and state.deal.tribute is not None:
+            for obligation in state.deal.tribute.obligations:
+                if obligation.giver == seat and obligation.tribute_card_id is None:
+                    legal_action = "tribute"
+                    break
+            if legal_action is None:
+                for obligation in state.deal.tribute.obligations:
+                    if (
+                        obligation.receiver == seat
+                        and obligation.tribute_card_id is not None
+                        and obligation.return_card_id is None
+                    ):
+                        legal_action = "return_tribute"
+                        break
     return SeatSnapshot(
         public=public_snapshot(
             state,

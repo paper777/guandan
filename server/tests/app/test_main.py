@@ -5,7 +5,7 @@ import json
 import unittest
 from urllib.parse import urlsplit
 
-from guandan.app.main import TABLES, app
+from server.app.main import TABLES, app
 
 
 async def call_app(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:

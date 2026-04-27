@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.domain.cards import CARD_BY_ID
-from guandan.domain.cards import Rank
-from guandan.domain.hand_types import HandType, parse_hand
+from server.domain.cards import CARD_BY_ID
+from server.domain.cards import Rank
+from server.domain.hand_types import HandType, parse_hand
 
 
 def cards(*ids: str):

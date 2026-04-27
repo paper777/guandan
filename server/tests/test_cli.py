@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.cli import format_card_id, format_public_snapshot, run_cli
+from client.cli import format_card_id, format_public_snapshot, run_cli
 
 
 class FakeClient:

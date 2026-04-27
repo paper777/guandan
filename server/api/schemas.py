@@ -4,10 +4,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from guandan.domain.events import CommandRejected, Event
-from guandan.domain.seats import Seat
-from guandan.domain.state import MatchPhase
-from guandan.services.snapshots import PublicTableSnapshot, SeatSnapshot
+from server.domain.events import CommandRejected, Event
+from server.domain.seats import Seat
+from server.domain.state import MatchPhase
+from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
 
 class TableCreateResponse(BaseModel):
@@ -44,6 +44,7 @@ class PublicTableSnapshotSchema(BaseModel):
     current_turn: Seat | None
     finish_order: tuple[Seat, ...]
     event_seq: int
+    current_level: str = "2"
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None
@@ -109,6 +110,14 @@ class PassRequest(ControllerCommandRequest):
     pass
 
 
+class SubmitTributeRequest(ControllerCommandRequest):
+    card_id: str
+
+
+class ReturnTributeRequest(ControllerCommandRequest):
+    card_id: str
+
+
 class EventSchema(BaseModel):
     seq: int
     type: str
@@ -143,7 +152,7 @@ class RejectionResponse(BaseModel):
 
 
 class WebSocketClientMessage(BaseModel):
-    type: Literal["snapshot", "ready", "start", "play_cards", "pass"]
+    type: Literal["snapshot", "ready", "start", "play_cards", "pass", "submit_tribute", "return_tribute"]
     request_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 

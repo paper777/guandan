@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from guandan.domain.cards import Rank, STANDARD_RANKS
-from guandan.domain.hand_types import HandType, PlayedHand
+from server.domain.cards import Rank, STANDARD_RANKS
+from server.domain.hand_types import HandType, PlayedHand
 
 
 @dataclass(frozen=True, slots=True)

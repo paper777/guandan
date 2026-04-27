@@ -7,13 +7,14 @@ Architecture notes live in `docs/guandan_server_tech_design.md`.
 Source layout:
 
 - `pyproject.toml`, `uv.lock`: root Python project and uv environment configuration.
+- `client/`: shared CLI, Guandan table HTTP client, and NPC protocol request types.
 - `server/`: Python server package source.
-- `server/guandan/domain/`: pure Guandan rules engine, state, commands, events, scoring, and tribute logic.
-- `server/guandan/controllers/`: human, local bot, and external AI agent controller adapters.
-- `server/guandan/api/`: FastAPI HTTP and WebSocket schemas/routes.
-- `server/guandan/services/`: table actor, lobby, replay, and snapshot filtering.
-- `server/guandan/persistence/`: SQLite models and repositories.
-- `npc/`: external NPC policy, broker, and shared client/server helpers.
+- `server/domain/`: pure Guandan rules engine, state, commands, events, scoring, and tribute logic.
+- `server/controllers/`: human, local bot, and external AI agent controller adapters.
+- `server/api/`: FastAPI HTTP and WebSocket schemas/routes.
+- `server/services/`: table actor, lobby, replay, and snapshot filtering.
+- `server/persistence/`: SQLite models and repositories.
+- `npc/`: external NPC policy, broker, and policy server helpers.
 - `server/tests/`: unit, property, and integration tests mirroring source modules.
 
 Keep rule logic independent from web, SQLite, and wall-clock time.
@@ -32,7 +33,7 @@ Key commands:
 - `pytest`: run the full test suite after installing `.[dev]`.
 - `pytest server/tests/domain`: run rule-engine tests.
 - `uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
-- `uv run uvicorn guandan.app.main:app --reload`: run the local API server directly with uvicorn.
+- `uv run uvicorn server.app.main:app --reload`: run the local API server directly with uvicorn.
 
 Document any command changes in this file when tooling is introduced.
 

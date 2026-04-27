@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from guandan.domain.cards import CARD_BY_ID, LEVEL_RANKS, Rank, deal_cards, is_red_heart_level_card, resolve_cards
-from guandan.domain.commands import (
+from server.domain.cards import CARD_BY_ID, LEVEL_RANKS, Rank, deal_cards, is_red_heart_level_card, resolve_cards
+from server.domain.commands import (
     AttachController,
     Command,
     DetachController,
@@ -15,12 +15,12 @@ from guandan.domain.commands import (
     StartMatch,
     SubmitTribute,
 )
-from guandan.domain.comparator import RankContext, can_beat
-from guandan.domain.controllers import ControllerCapability
-from guandan.domain.events import CommandRejected, Event, ReducerResult, RejectCode
-from guandan.domain.hand_types import AmbiguousHandError, parse_hand
-from guandan.domain.seats import SEATS, Seat, next_seat, partner_for_seat, team_for_seat
-from guandan.domain.state import DealResult, DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
+from server.domain.comparator import RankContext, can_beat
+from server.domain.controllers import ControllerCapability
+from server.domain.events import CommandRejected, Event, ReducerResult, RejectCode
+from server.domain.hand_types import AmbiguousHandError, parse_hand
+from server.domain.seats import SEATS, Seat, next_seat, partner_for_seat, team_for_seat
+from server.domain.state import DealResult, DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
 
 
 def reduce_command(state: MatchState, command: Command) -> ReducerResult:

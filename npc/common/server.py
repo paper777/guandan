@@ -4,7 +4,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from npc.common.client import ActionRequest, JsonObject, NpcPolicy
+from client.api import ActionRequest, JsonObject, NpcPolicy
 
 
 def run_policy_server(policy: NpcPolicy, *, host: str = "127.0.0.1", port: int = 9001) -> None:

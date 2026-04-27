@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from npc.common.client import ActionRequest
+from client.api import ActionRequest
 from npc.dummy_bot.policy import DummyBotPolicy
 
 

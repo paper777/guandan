@@ -5,7 +5,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from guandan.services.snapshots import SeatSnapshot
+from server.services.snapshots import SeatSnapshot
 
 
 @dataclass(frozen=True, slots=True)

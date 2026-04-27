@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from guandan.server import DEFAULT_APP, parse_args
+from server.server import DEFAULT_APP, parse_args
 
 
 class ServerEntrypointTests(unittest.TestCase):

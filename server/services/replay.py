@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from guandan.domain.cards import Rank, resolve_cards
-from guandan.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
-from guandan.domain.events import Event
-from guandan.domain.hand_types import parse_hand
-from guandan.domain.seats import SEATS, Seat, Team, next_seat
-from guandan.domain.state import (
+from server.domain.cards import Rank, resolve_cards
+from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
+from server.domain.events import Event
+from server.domain.hand_types import parse_hand
+from server.domain.seats import SEATS, Seat, Team, next_seat
+from server.domain.state import (
     DealResult,
     DealState,
     MatchPhase,
