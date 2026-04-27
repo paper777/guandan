@@ -46,6 +46,7 @@ packages = [
   "npc.broker",
   "npc.common",
   "npc.dummy_bot",
+  "npc.llm_agent",
 ]
 
 [tool.setuptools.package-dir]
@@ -61,6 +62,7 @@ npc = "npc"
 "npc.broker" = "npc/broker"
 "npc.common" = "npc/common"
 "npc.dummy_bot" = "npc/dummy_bot"
+"npc.llm_agent" = "npc/llm_agent"
 
 [tool.pytest.ini_options]
 testpaths = ["server/tests", "npc"]

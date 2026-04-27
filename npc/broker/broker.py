@@ -77,6 +77,7 @@ class NpcBroker:
                 )
             )
             response = self._submit_action(broker_seat, action)
+            self._notify_action_observers(broker_seat, action, response)
             results.append(BrokerActionResult(action=action, response=response))
         return results
 
@@ -91,7 +92,16 @@ class NpcBroker:
             return self.client.pass_turn(self.table_id, broker_seat.seat, broker_seat.controller_id)
         if action_type == "play_cards":
             card_ids = tuple(str(card_id) for card_id in action.get("card_ids", []))
-            return self.client.play_cards(self.table_id, broker_seat.seat, broker_seat.controller_id, card_ids)
+            declared_type = action.get("declared_type")
+            if declared_type is None:
+                return self.client.play_cards(self.table_id, broker_seat.seat, broker_seat.controller_id, card_ids)
+            return self.client.play_cards(
+                self.table_id,
+                broker_seat.seat,
+                broker_seat.controller_id,
+                card_ids,
+                declared_type=str(declared_type),
+            )
         if action_type == "submit_tribute":
             return self.client.submit_tribute(
                 self.table_id,
@@ -107,6 +117,24 @@ class NpcBroker:
                 str(action["card_id"]),
             )
         raise ValueError(f"unsupported NPC action: {action_type}")
+
+    def _notify_action_observers(self, actor: BrokerSeat, action: JsonObject, response: JsonObject) -> None:
+        events = response.get("events", [])
+        event_seq = response.get("event_seq")
+        for observer in self.seats.values():
+            observe_action = getattr(observer.policy, "observe_action", None)
+            if observe_action is None:
+                continue
+            observe_action(
+                {
+                    "table_id": self.table_id,
+                    "observer_seat": observer.seat,
+                    "actor_seat": actor.seat,
+                    "action": action,
+                    "events": events if isinstance(events, list) else [],
+                    "event_seq": event_seq,
+                }
+            )
 
 
 def main() -> None:

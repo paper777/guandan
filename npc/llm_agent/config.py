@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True, slots=True)
+class LlmAgentConfig:
+    """Runtime configuration for one isolated LLM agent player."""
+
+    player_name: str | None = None
+    player_id: str | None = None
+    seat: str | None = None
+    storage_dir: str | Path = Path("npc/llm_agent/data")
+    memory_path: str | Path | None = None
+    action_log_path: str | Path | None = None
+    provider_name: str = "deterministic"
+    model_name: str = "deterministic-guandan-v1"
+    timeout_seconds: float = 3.0
+    temperature: float = 0.2
+    max_recent_actions: int = 20
+
+    def namespace_for(self, seat: str | None = None) -> str:
+        raw = self.player_id or self.seat or seat or self.player_name or "llm-agent"
+        return _safe_path_part(raw)
+
+    def display_name_for(self, seat: str | None = None) -> str:
+        return self.player_name or f"LLM {self.seat or seat or 'Agent'}"
+
+    def resolved_memory_path(self, seat: str | None = None) -> Path:
+        if self.memory_path is not None:
+            return Path(self.memory_path)
+        return Path(self.storage_dir) / self.namespace_for(seat) / "memory.json"
+
+    def resolved_action_log_path(self, seat: str | None = None) -> Path:
+        if self.action_log_path is not None:
+            return Path(self.action_log_path)
+        return Path(self.storage_dir) / self.namespace_for(seat) / "actions.json"
+
+
+def _safe_path_part(value: str) -> str:
+    cleaned = "".join(character if character.isalnum() or character in {"-", "_"} else "-" for character in value)
+    cleaned = cleaned.strip("-_")
+    return cleaned or "llm-agent"
