@@ -91,6 +91,25 @@ class NpcBrokerTests(unittest.TestCase):
             ],
         )
 
+    def test_targeted_poll_only_submits_for_requested_seat(self) -> None:
+        client = FakeClient()
+        broker = NpcBroker(client, "table-1")
+        south = broker.add_seat("S", DummyBotPolicy(), "Dummy S")
+        west = broker.add_seat("W", DummyBotPolicy(), "Dummy W")
+        south.controller_id = "c-S"
+        west.controller_id = "c-W"
+
+        actions = broker.poll_once("W")
+
+        self.assertEqual(actions, [{"type": "play_cards", "card_ids": ["D1-S-3"]}])
+        self.assertEqual(
+            client.calls,
+            [
+                ("seat_snapshot", "table-1", "W", "c-W"),
+                ("play_cards", "table-1", "W", "c-W", ("D1-S-3",)),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import unittest
 
-from client.cli import format_card_id, format_public_snapshot, run_cli
+from client.api import GuandanClientError
+from client.cli import (
+    CliSession,
+    drive_bot_turns,
+    format_card_id,
+    format_hand,
+    format_public_snapshot,
+    format_seat_snapshot,
+    resolve_card_inputs,
+    run_cli,
+)
 
 
 class FakeClient:
@@ -14,7 +24,7 @@ class FakeClient:
         self.event_seq = 0
         self.calls: list[tuple] = []
         self.hands = {
-            "E": ["D1-S-3", "D2-S-3"],
+            "E": ["D1-H-4", "D1-C-3", "D2-S-3"],
             "S": ["D1-H-4"],
             "W": ["D1-C-4"],
             "N": ["D1-D-4"],
@@ -37,6 +47,11 @@ class FakeClient:
         self.calls.append(("join_local_bot", table_id, seat, player_id, controller_id, display_name))
         self.seats[seat] = {"display_name": display_name or player_id, "kind": "bot"}
         return {"controller_id": controller_id, "snapshot": self._snapshot()}
+
+    def join_agent(self, table_id, seat, display_name):
+        self.calls.append(("join_agent", table_id, seat, display_name))
+        self.seats[seat] = {"display_name": display_name, "kind": "agent"}
+        return {"player_id": f"agent-{seat}", "controller_id": f"agent-controller-{seat}"}
 
     def ready(self, table_id, seat, controller_id):
         self.calls.append(("ready", table_id, seat, controller_id))
@@ -93,36 +108,90 @@ class FakeClient:
 
 
 class CliTests(unittest.TestCase):
-    def test_default_play_creates_human_and_three_bots(self) -> None:
+    def test_default_play_creates_human_and_three_broker_agents(self) -> None:
         client = FakeClient()
 
         result = run_cli([], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Connected to table table-1 as seat E.", result.output)
-        self.assertIn("Hand: 1: ♠️ 3  2: ♠️ 3", result.output)
+        self.assertIn("Table table-1 | Phase PLAYING | Seat E", result.output)
+        self.assertIn("Seats: E human-E (3) | S Dummy S (1) | W Dummy W (1) | N Dummy N (1)", result.output)
+        self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "human-E"), client.calls)
-        self.assertIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
-        self.assertIn(("join_local_bot", "table-1", "W", "bot-W", "bot-controller-W", "Bot W"), client.calls)
-        self.assertIn(("join_local_bot", "table-1", "N", "bot-N", "bot-controller-N", "Bot N"), client.calls)
+        self.assertIn(("join_agent", "table-1", "S", "Dummy S"), client.calls)
+        self.assertIn(("join_agent", "table-1", "W", "Dummy W"), client.calls)
+        self.assertIn(("join_agent", "table-1", "N", "Dummy N"), client.calls)
+        self.assertNotIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
         self.assertIn(("start", "table-1", "cli-demo"), client.calls)
 
-    def test_human_play_then_drives_bot_passes(self) -> None:
+    def test_human_play_readable_card_label_then_drives_bot_passes(self) -> None:
         client = FakeClient()
-        commands = iter(["play 1", "quit"])
+        commands = iter(["play C3", "quit"])
 
         result = run_cli([], input_fn=lambda prompt: next(commands), client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(("play_cards", "table-1", "E", "human-controller-E", ("D1-S-3",), None), client.calls)
-        self.assertIn(("pass_turn", "table-1", "S", "bot-controller-S"), client.calls)
-        self.assertIn(("pass_turn", "table-1", "W", "bot-controller-W"), client.calls)
-        self.assertIn(("pass_turn", "table-1", "N", "bot-controller-N"), client.calls)
+        self.assertIn(("play_cards", "table-1", "E", "human-controller-E", ("D1-C-3",), None), client.calls)
+        self.assertIn(("pass_turn", "table-1", "S", "agent-controller-S"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "W", "agent-controller-W"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "N", "agent-controller-N"), client.calls)
+        self.assertIn("1: E played single [♣️ 3]", result.output)
+        self.assertIn("2: S passed", result.output)
+        self.assertIn("3: W passed", result.output)
+        self.assertIn("4: N passed", result.output)
 
     def test_card_formatter_hides_first_deck_and_uses_suit_emoji(self) -> None:
         self.assertEqual(format_card_id("D1-S-3"), "♠️ 3")
         self.assertEqual(format_card_id("D2-H-10"), "♥️ 10")
         self.assertEqual(format_card_id("D1-SJ"), "🃏SJ")
+
+    def test_hand_formatter_sorts_by_number_then_suit(self) -> None:
+        self.assertEqual(
+            format_hand(["D1-C-3", "D1-H-2", "D1-S-3", "D2-D-2", "D1-BJ", "D1-SJ"]),
+            "♥️ 2  ♦️ 2  ♠️ 3  ♣️ 3  🃏SJ  🃏BJ",
+        )
+
+    def test_numeric_card_input_uses_sorted_hand_order(self) -> None:
+        self.assertEqual(
+            resolve_card_inputs(["1", "3"], {"hand": ["D1-C-3", "D1-H-2", "D1-S-3"]}),
+            ("D1-H-2", "D1-C-3"),
+        )
+
+    def test_readable_card_input_resolves_against_hand(self) -> None:
+        self.assertEqual(
+            resolve_card_inputs(["S3", "♥2", "SJ"], {"hand": ["D1-SJ", "D1-H-2", "D2-S-3"]}),
+            ("D2-S-3", "D1-H-2", "D1-SJ"),
+        )
+
+    def test_repeated_readable_card_input_uses_distinct_physical_cards(self) -> None:
+        self.assertEqual(
+            resolve_card_inputs(["S3", "S3"], {"hand": ["D2-S-3", "D1-S-3"]}),
+            ("D1-S-3", "D2-S-3"),
+        )
+
+    def test_bot_turn_race_refreshes_instead_of_printing_not_your_turn(self) -> None:
+        class RaceBroker:
+            seats = {"S": object()}
+
+            def poll_once_results(self, seat):
+                raise GuandanClientError(400, "NOT_YOUR_TURN", {"rejection": {"code": "NOT_YOUR_TURN"}})
+
+        client = FakeClient()
+        client.phase = "PLAYING"
+        client.current_turn = "S"
+        output = []
+
+        snapshot = drive_bot_turns(
+            client,
+            CliSession("table-1", "E", "human-controller-E", RaceBroker()),
+            client._snapshot(),
+            output.append,
+            4,
+        )
+
+        self.assertEqual(snapshot["current_turn"], "S")
+        self.assertEqual(output, [])
 
     def test_public_snapshot_shows_timer_when_deadline_is_present(self) -> None:
         output = format_public_snapshot(
@@ -139,6 +208,28 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("Timer:", output)
+
+    def test_seat_snapshot_merges_header_and_seats(self) -> None:
+        output = format_seat_snapshot(
+            {
+                "public": {
+                    "table_id": "table-1",
+                    "phase": "PLAYING",
+                    "event_seq": 1,
+                    "current_turn": "E",
+                    "seats": {"E": {"display_name": "East"}, "S": {"display_name": "South"}},
+                    "hand_counts": {"E": 3, "S": 4, "W": 0, "N": 0},
+                    "finish_order": [],
+                },
+                "seat": "E",
+                "legal_action": "lead",
+                "hand": ["D1-H-4", "D1-C-3", "D2-S-3"],
+            }
+        )
+
+        self.assertIn("Table table-1 | Phase PLAYING | Seat E", output)
+        self.assertIn("Seats: E East (3) | S South (4) | W - (0) | N - (0)", output)
+        self.assertNotIn("Your seat:", output)
 
 
 if __name__ == "__main__":

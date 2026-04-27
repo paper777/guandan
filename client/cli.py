@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from client.api import GuandanClientError, GuandanHttpClient, JsonObject
+from npc.broker.broker import NpcBroker
+from npc.dummy_bot.policy import DummyBotPolicy
 from server.domain.seats import SEATS
 
 
@@ -18,6 +20,33 @@ SUIT_EMOJI = {
     "D": "♦️ ",
     "C": "♣️ ",
 }
+SUIT_INPUT_ALIASES = {
+    "S": "S",
+    "SPADE": "S",
+    "SPADES": "S",
+    "♠": "S",
+    "♠️": "S",
+    "H": "H",
+    "HEART": "H",
+    "HEARTS": "H",
+    "♥": "H",
+    "♥️": "H",
+    "D": "D",
+    "DIAMOND": "D",
+    "DIAMONDS": "D",
+    "♦": "D",
+    "♦️": "D",
+    "C": "C",
+    "CLUB": "C",
+    "CLUBS": "C",
+    "♣": "C",
+    "♣️": "C",
+}
+RANK_SORT_ORDER = {
+    rank: index
+    for index, rank in enumerate(("2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "SJ", "BJ"))
+}
+SUIT_SORT_ORDER = {suit: index for index, suit in enumerate(("S", "H", "D", "C"))}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +60,7 @@ class CliSession:
     table_id: str
     human_seat: str
     human_controller_id: str
-    bot_controller_ids: dict[str, str]
+    bot_broker: NpcBroker
 
 
 InputFn = Callable[[str], str]
@@ -122,11 +151,11 @@ def _run_play(
     public_snapshot = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
 
     while public_snapshot.get("phase") == "PLAYING":
-        current_turn = public_snapshot.get("current_turn")
-        if current_turn != session.human_seat:
+        acting_seat = snapshot_acting_seat(public_snapshot)
+        if acting_seat != session.human_seat:
             updated = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
             if updated == public_snapshot:
-                emit(f"Waiting for seat {current_turn}.")
+                emit(f"Waiting for seat {acting_seat}.")
                 break
             public_snapshot = updated
             continue
@@ -187,34 +216,21 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
         human_controller_id = str(response.get("controller_id", human_controller_id))
         public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)
 
-    bot_controller_ids: dict[str, str] = {}
+    bot_broker = NpcBroker(client, table_id)
     seats = public_snapshot.get("seats", {})
     for seat in [seat.value for seat in SEATS if seat.value != human_seat]:
         if seat in seats:
-            player = seats.get(seat)
-            if isinstance(player, dict) and player.get("kind") == "bot":
-                bot_controller_ids[seat] = f"bot-controller-{seat}"
             continue
-        controller_id = f"bot-controller-{seat}"
-        response = client.join_local_bot(
-            table_id,
-            seat,
-            player_id=f"bot-{seat}",
-            controller_id=controller_id,
-            display_name=f"Bot {seat}",
-        )
-        bot_controller_ids[seat] = str(response.get("controller_id", controller_id))
-        public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)
-        seats = public_snapshot.get("seats", {})
+        bot_broker.add_seat(seat, DummyBotPolicy(), display_name=f"Dummy {seat}")
 
-    for seat, controller_id in {human_seat: human_controller_id, **bot_controller_ids}.items():
-        client.ready(table_id, seat, controller_id)
+    client.ready(table_id, human_seat, human_controller_id)
+    bot_broker.join_and_ready_all()
 
     public_snapshot = client.table_snapshot(table_id)
     if public_snapshot.get("phase") != "PLAYING":
         response = client.start(table_id, seed=args.seed)
         public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)
-    return CliSession(table_id, human_seat, human_controller_id, bot_controller_ids), public_snapshot
+    return CliSession(table_id, human_seat, human_controller_id, bot_broker), public_snapshot
 
 
 def drive_bot_turns(
@@ -227,26 +243,31 @@ def drive_bot_turns(
     current = public_snapshot
     actions = 0
     while current.get("phase") == "PLAYING":
-        seat = current.get("current_turn")
-        if not isinstance(seat, str) or seat not in session.bot_controller_ids:
+        seat = snapshot_acting_seat(current)
+        if not isinstance(seat, str) or seat not in session.bot_broker.seats:
             return current
         if actions >= max_actions:
             emit("Stopped automatic bot play after reaching the safety limit.")
             return current
-        controller_id = session.bot_controller_ids[seat]
-        snapshot = client.seat_snapshot(session.table_id, seat, controller_id)
         try:
-            if snapshot.get("legal_action") == "lead" and snapshot.get("hand"):
-                response = client.play_cards(session.table_id, seat, controller_id, (str(snapshot["hand"][0]),))
-            else:
-                response = client.pass_turn(session.table_id, seat, controller_id)
+            submitted = session.bot_broker.poll_once_results(seat)
         except GuandanClientError as exc:
+            if client_error_code(exc) == "NOT_YOUR_TURN":
+                return client.table_snapshot(session.table_id)
             emit(format_client_error(exc))
             return client.table_snapshot(session.table_id)
-        emit(format_command_response(response).rstrip())
-        current = response.get("snapshot") or client.table_snapshot(session.table_id)
-        actions += 1
+        if not submitted:
+            return client.table_snapshot(session.table_id)
+        for result in submitted:
+            emit(format_command_response(result.response).rstrip())
+        current = client.table_snapshot(session.table_id)
+        actions += len(submitted)
     return current
+
+
+def snapshot_acting_seat(snapshot: JsonObject) -> str | None:
+    seat = snapshot.get("acting_seat") or snapshot.get("current_turn")
+    return seat if isinstance(seat, str) else None
 
 
 def submit_human_command(
@@ -269,24 +290,17 @@ def submit_human_command(
     raise GuandanClientError(None, f"unsupported command: {command}")
 
 
-def format_public_snapshot(snapshot: JsonObject) -> str:
+def format_public_snapshot(snapshot: JsonObject, *, viewer_seat: object = None) -> str:
     seats = snapshot.get("seats", {})
     hand_counts = snapshot.get("hand_counts", {})
-    lines = [
-        f"Table: {snapshot.get('table_id', '-')}",
-        f"Phase: {snapshot.get('phase', '-')}",
-        f"Seq: {snapshot.get('event_seq', '-')}",
-        f"Turn: {snapshot.get('current_turn') or '-'}",
-    ]
+    header = f"Table {snapshot.get('table_id', '-')} | Phase {snapshot.get('phase', '-')}"
+    if viewer_seat is not None:
+        header += f" | Seat {viewer_seat}"
+    lines = [header, f"Seq: {snapshot.get('event_seq', '-')} | Turn: {snapshot.get('current_turn') or '-'}"]
     timer = format_timer(snapshot)
     if timer is not None:
         lines.append(f"Timer: {timer}")
-    lines.append("Seats:")
-    for seat in [seat.value for seat in SEATS]:
-        player = seats.get(seat)
-        name = player.get("display_name", "-") if isinstance(player, dict) else "-"
-        count = hand_counts.get(seat, 0)
-        lines.append(f"  {seat}: {name} ({count} cards)")
+    lines.append("Seats: " + " | ".join(format_seat_summary(seat.value, seats, hand_counts) for seat in SEATS))
     finish_order = snapshot.get("finish_order") or ()
     if finish_order:
         lines.append("Finish: " + " ".join(str(seat) for seat in finish_order))
@@ -294,11 +308,17 @@ def format_public_snapshot(snapshot: JsonObject) -> str:
 
 
 def format_seat_snapshot(snapshot: JsonObject) -> str:
-    lines = [format_public_snapshot(snapshot["public"]).rstrip()]
-    lines.append(f"Your seat: {snapshot.get('seat')}")
+    lines = [format_public_snapshot(snapshot["public"], viewer_seat=snapshot.get("seat")).rstrip()]
     lines.append(f"Legal action: {snapshot.get('legal_action') or '-'}")
     lines.append("Hand: " + format_hand(snapshot.get("hand", ())))
     return "\n".join(lines) + "\n"
+
+
+def format_seat_summary(seat: str, seats: object, hand_counts: object) -> str:
+    player = seats.get(seat) if isinstance(seats, dict) else None
+    name = player.get("display_name", "-") if isinstance(player, dict) else "-"
+    count = hand_counts.get(seat, 0) if isinstance(hand_counts, dict) else 0
+    return f"{seat} {name} ({count})"
 
 
 def format_command_response(response: JsonObject) -> str:
@@ -325,7 +345,8 @@ def help_text() -> str:
     return "\n".join(
         (
             "Commands:",
-            "  play <hand-number-or-card-id> [<hand-number-or-card-id>...]",
+            "  play <card-label-or-id> [<card-label-or-id>...]",
+            "    examples: play S3, play H10 C10, play SJ",
             "  pass",
             "  hand",
             "  table",
@@ -340,6 +361,14 @@ def format_client_error(error: GuandanClientError) -> str:
     return f"Error: {status}{error}"
 
 
+def client_error_code(error: GuandanClientError) -> str | None:
+    rejection = error.payload.get("rejection")
+    if not isinstance(rejection, dict):
+        return None
+    code = rejection.get("code")
+    return code if isinstance(code, str) else None
+
+
 def format_timer(snapshot: JsonObject) -> str | None:
     deadline = snapshot.get("action_deadline_epoch_ms")
     if not isinstance(deadline, int):
@@ -351,7 +380,7 @@ def format_timer(snapshot: JsonObject) -> str | None:
 def format_hand(card_ids: object) -> str:
     if not isinstance(card_ids, (list, tuple)):
         return ""
-    return "  ".join(f"{index}: {format_card_id(str(card_id))}" for index, card_id in enumerate(card_ids, start=1))
+    return "  ".join(format_card_id(card_id) for card_id in sort_card_ids(card_ids))
 
 
 def format_card_list(card_ids: object) -> str:
@@ -374,18 +403,101 @@ def format_card_id(card_id: str) -> str:
     return card_id
 
 
+def sort_card_ids(card_ids: object) -> tuple[str, ...]:
+    if not isinstance(card_ids, (list, tuple)):
+        return ()
+    return tuple(sorted((str(card_id) for card_id in card_ids), key=card_sort_key))
+
+
+def card_sort_key(card_id: str) -> tuple[int, int, int, str]:
+    parts = card_id.split("-")
+    if len(parts) == 3 and parts[0].startswith("D"):
+        return (RANK_SORT_ORDER.get(parts[2], 99), SUIT_SORT_ORDER.get(parts[1], 99), _deck_sort_value(parts[0]), card_id)
+    if len(parts) == 2 and parts[0].startswith("D"):
+        return (RANK_SORT_ORDER.get(parts[1], 99), 99, _deck_sort_value(parts[0]), card_id)
+    return (99, 99, 99, card_id)
+
+
+def _deck_sort_value(deck: str) -> int:
+    value = deck.removeprefix("D")
+    return int(value) if value.isdecimal() else 99
+
+
 def resolve_card_inputs(tokens: list[str], snapshot: JsonObject | None) -> tuple[str, ...]:
-    hand = snapshot.get("hand", ()) if snapshot is not None else ()
+    hand = sort_card_ids(snapshot.get("hand", ())) if snapshot is not None else ()
     resolved: list[str] = []
+    used: set[str] = set()
     for token in tokens:
-        if token.isdecimal() and isinstance(hand, (list, tuple)):
+        if token.isdecimal():
             index = int(token) - 1
             if index < 0 or index >= len(hand):
                 raise GuandanClientError(None, f"hand index out of range: {token}")
-            resolved.append(str(hand[index]))
+            card_id = str(hand[index])
+            if card_id in used:
+                raise GuandanClientError(None, f"card already selected: {format_card_id(card_id)}")
+            resolved.append(card_id)
+            used.add(card_id)
         else:
-            resolved.append(token)
+            card_id = resolve_card_label(token, hand, used)
+            resolved.append(card_id)
+            used.add(card_id)
     return tuple(resolved)
+
+
+def resolve_card_label(token: str, hand: tuple[str, ...], used: set[str]) -> str:
+    if token in hand:
+        if token in used:
+            raise GuandanClientError(None, f"card already selected: {format_card_id(token)}")
+        return token
+    if not hand:
+        return token
+    label = normalized_card_label(token)
+    if label is None:
+        return token
+    for card_id in hand:
+        if card_id in used:
+            continue
+        if normalized_card_label(card_id) == label:
+            return card_id
+    raise GuandanClientError(None, f"card not in hand: {token}")
+
+
+def normalized_card_label(value: str) -> tuple[str | None, str] | None:
+    raw = (
+        value.strip()
+        .upper()
+        .replace("\ufe0f", "")
+        .replace("🃏", "")
+    )
+    parts = raw.replace("_", "-").replace(":", "-").split("-")
+    if len(parts) == 2 and parts[0].startswith("D"):
+        rank = normalize_rank(parts[1])
+        return (None, rank) if rank in {"SJ", "BJ"} else None
+    if len(parts) == 3 and parts[0].startswith("D"):
+        suit = SUIT_INPUT_ALIASES.get(parts[1])
+        rank = normalize_rank(parts[2])
+        return (suit, rank) if suit is not None and rank in RANK_SORT_ORDER else None
+
+    token = raw.replace("-", "").replace("_", "").replace(":", "").replace(" ", "")
+    if not token:
+        return None
+    if token in {"SJ", "SMALLJOKER", "SMALL"}:
+        return (None, "SJ")
+    if token in {"BJ", "BIGJOKER", "BIG"}:
+        return (None, "BJ")
+    for suit_alias in sorted(SUIT_INPUT_ALIASES, key=len, reverse=True):
+        if token.startswith(suit_alias):
+            suit = SUIT_INPUT_ALIASES[suit_alias]
+            rank = normalize_rank(token[len(suit_alias) :])
+            return (suit, rank) if rank in RANK_SORT_ORDER else None
+    return None
+
+
+def normalize_rank(value: str) -> str:
+    rank = value.upper()
+    if rank == "T":
+        return "10"
+    return rank
 
 
 if __name__ == "__main__":

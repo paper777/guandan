@@ -20,6 +20,12 @@ class BrokerSeat:
     controller_id: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerActionResult:
+    action: JsonObject
+    response: JsonObject
+
+
 class NpcBroker:
     def __init__(self, client: GuandanNpcClient, table_id: str) -> None:
         self.client = client
@@ -38,9 +44,14 @@ class NpcBroker:
             broker_seat.controller_id = str(response.get("controller_id", ""))
             self.client.ready(self.table_id, broker_seat.seat, broker_seat.controller_id)
 
-    def poll_once(self) -> list[JsonObject]:
-        actions: list[JsonObject] = []
+    def poll_once(self, seat: str | None = None) -> list[JsonObject]:
+        return [result.action for result in self.poll_once_results(seat)]
+
+    def poll_once_results(self, seat: str | None = None) -> list[BrokerActionResult]:
+        results: list[BrokerActionResult] = []
         for broker_seat in self.seats.values():
+            if seat is not None and broker_seat.seat != seat:
+                continue
             if broker_seat.controller_id == "":
                 continue
             snapshot = self.client.seat_snapshot(self.table_id, broker_seat.seat, broker_seat.controller_id)
@@ -65,9 +76,9 @@ class NpcBroker:
                     },
                 )
             )
-            self._submit_action(broker_seat, action)
-            actions.append(action)
-        return actions
+            response = self._submit_action(broker_seat, action)
+            results.append(BrokerActionResult(action=action, response=response))
+        return results
 
     def run_forever(self, *, interval_seconds: float = 0.5) -> None:
         while True:
