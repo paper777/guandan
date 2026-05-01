@@ -1,6 +1,6 @@
-"""LLM-backed NPC policy with per-player filesystem memory."""
+"""LLM-backed NPC player with per-player filesystem memory."""
 
-from npc.llm_agent.card_player import CardPlayerAdvisor
+from npc.llm_agent.advisor import ActionAdvice, ActionAdvisor, ActionCandidate
 from npc.llm_agent.config import LlmAgentConfig
 from npc.llm_agent.models import (
     ClaudeMessagesModelClient,
@@ -12,13 +12,15 @@ from npc.llm_agent.models import (
     OpenAIResponsesModelClient,
 )
 from npc.llm_agent.personality import PERSONALITY_FACTORS, normalize_personality, personality_context
-from npc.llm_agent.policy import LlmAgentPlayer, LlmAgentPolicy
+from npc.llm_agent.player import LlmAgentPlayer, LlmAgentPolicy
 from npc.llm_agent.provider import DeterministicLlmProvider, LlmActionProvider, ModelBackedLlmProvider
 from npc.llm_agent.skills import CARD_RECORDER_SKILL, LLM_AGENT_SKILLS
 
 __all__ = [
+    "ActionAdvice",
+    "ActionAdvisor",
+    "ActionCandidate",
     "CARD_RECORDER_SKILL",
-    "CardPlayerAdvisor",
     "ClaudeMessagesModelClient",
     "CodexCliModelClient",
     "DeterministicLlmProvider",

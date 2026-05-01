@@ -5,7 +5,7 @@ import tempfile
 
 from client.api import ActionRequest
 from npc.llm_agent import LlmAgentConfig
-from npc.llm_agent.policy import LlmAgentPlayer
+from npc.llm_agent import LlmAgentPlayer
 
 
 class StrategyContextTests(unittest.TestCase):

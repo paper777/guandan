@@ -3,12 +3,12 @@ from __future__ import annotations
 import unittest
 
 from client.api import ActionRequest
-from npc.llm_agent.card_player import CardPlayerAdvisor
+from npc.llm_agent import ActionAdvisor
 
 
-class CardPlayerAdvisorTests(unittest.TestCase):
+class ActionAdvisorTests(unittest.TestCase):
     def test_lead_candidates_include_low_single_and_structures(self) -> None:
-        advice = CardPlayerAdvisor().advise(
+        advice = ActionAdvisor().advise(
             ActionRequest(
                 "r-1",
                 {"kind": "lead", "current_level": "2"},
@@ -26,7 +26,7 @@ class CardPlayerAdvisorTests(unittest.TestCase):
         )
 
     def test_play_or_pass_recommends_lowest_beating_candidate_when_trick_is_known(self) -> None:
-        advice = CardPlayerAdvisor().advise(
+        advice = ActionAdvisor().advise(
             ActionRequest(
                 "r-1",
                 {
@@ -42,7 +42,7 @@ class CardPlayerAdvisorTests(unittest.TestCase):
         self.assertEqual(advice["candidates"][-1]["action"], {"type": "pass"})
 
     def test_play_or_pass_recommends_pass_when_no_known_beating_candidate(self) -> None:
-        advice = CardPlayerAdvisor().advise(
+        advice = ActionAdvisor().advise(
             ActionRequest(
                 "r-1",
                 {
@@ -57,7 +57,7 @@ class CardPlayerAdvisorTests(unittest.TestCase):
         self.assertEqual(advice["recommended_action"], {"type": "pass"})
 
     def test_tribute_excludes_red_heart_level_card(self) -> None:
-        advice = CardPlayerAdvisor().advise(
+        advice = ActionAdvisor().advise(
             ActionRequest(
                 "r-1",
                 {"kind": "tribute", "current_level": "2"},

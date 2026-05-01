@@ -10,6 +10,8 @@ from client.cli import (
     CliSession,
     drive_bot_turns,
     format_card_id,
+    format_command_response,
+    format_friend_mark,
     format_hand,
     format_npc_metadata,
     format_public_snapshot,
@@ -121,7 +123,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Table table-1 | You are E", result.output)
         self.assertIn("PLAYING | Seat E | Turn E", result.output)
         self.assertIn("Players: E human-E 3 | S Jade 1 [", result.output)
-        self.assertIn("W River 1 [", result.output)
+        self.assertIn("W(F) River 1 [", result.output)
         self.assertIn("N Atlas 1 [", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "human-E"), client.calls)
@@ -161,6 +163,29 @@ class CliTests(unittest.TestCase):
             return next(commands)
 
         result = run_cli(["--npc-lineup", "dummy"], input_fn=input_after_timeout, client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("pass_turn", "table-1", "S", "agent-controller-S"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "W", "agent-controller-W"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "N", "agent-controller-N"), client.calls)
+        self.assertIn("2: S passed", result.output)
+        self.assertIn("3: W passed", result.output)
+        self.assertIn("4: N passed", result.output)
+
+    def test_human_input_deadline_refreshes_without_command(self) -> None:
+        client = FakeClient()
+        timed_out = False
+
+        def input_timeout(prompt):
+            nonlocal timed_out
+            if not timed_out and client.current_turn == "E":
+                timed_out = True
+                client.current_turn = "S"
+                client.event_seq += 1
+                return None
+            return "quit"
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=input_timeout, client=client)
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn(("pass_turn", "table-1", "S", "agent-controller-S"), client.calls)
@@ -316,8 +341,33 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("PLAYING | Seat E | Turn E", output)
-        self.assertIn("Players: E East 3 | S South 4 | W - 0 | N - 0", output)
+        self.assertIn("Players: E East 3 | S South 4 | W(F) - 0 | N - 0", output)
         self.assertNotIn("Your seat:", output)
+
+    def test_friend_mark_identifies_partner_for_viewer_seat(self) -> None:
+        self.assertEqual(format_friend_mark("W", "E"), "(F)")
+        self.assertEqual(format_friend_mark("S", "E"), "")
+
+    def test_command_response_omits_action_prompted_events(self) -> None:
+        output = format_command_response(
+            {
+                "events": [
+                    {
+                        "seq": 1,
+                        "type": "CardsPlayed",
+                        "payload": {"seat": "E", "hand_type": "single", "card_ids": ["D1-S-3"]},
+                    },
+                    {
+                        "seq": 2,
+                        "type": "ActionPrompted",
+                        "payload": {"seat": "S", "kind": "play_or_pass"},
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(output, "1: E played single [♠️ 3]\n")
+        self.assertNotIn("ActionPrompted", output)
 
 
 if __name__ == "__main__":

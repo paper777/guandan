@@ -8,7 +8,7 @@ from pathlib import Path
 from client.api import ActionRequest
 from npc.broker.broker import NpcBroker
 from npc.common.player import Player
-from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
+from npc.llm_agent import ActionAdvisor, LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 from npc.llm_agent.skills import CARD_RECORDER_SKILL
 
@@ -86,6 +86,7 @@ class LlmAgentPolicyTests(unittest.TestCase):
     def test_policy_alias_points_to_player_class(self) -> None:
         self.assertIs(LlmAgentPolicy, LlmAgentPlayer)
         self.assertIsInstance(LlmAgentPolicy(), Player)
+        self.assertIsInstance(ActionAdvisor(), ActionAdvisor)
 
     def test_provider_prompt_includes_central_system_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +112,11 @@ class LlmAgentPolicyTests(unittest.TestCase):
                 {"type": "play_cards", "card_ids": ["D1-S-3"]},
             )
             self.assertIn("Bombs are tempo tools", provider.prompts[-1]["system_prompt"])
+            self.assertIn("Rank strength is level-dependent", provider.prompts[-1]["system_prompt"])
+            self.assertIn("Legal hand shapes are", provider.prompts[-1]["system_prompt"])
+            self.assertIn("Bomb hierarchy", provider.prompts[-1]["system_prompt"])
+            self.assertIn("A trick ends after three consecutive passes", provider.prompts[-1]["system_prompt"])
+            self.assertIn("During tribute, submit the highest eligible card", provider.prompts[-1]["system_prompt"])
             self.assertIn("card_player", provider.prompts[-1]["system_prompt"])
             self.assertIn(CARD_RECORDER_SKILL, provider.prompts[-1]["skills"])
 
@@ -197,7 +203,7 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertIn("thinking", action)
             entries = _read_json(action_path)
             self.assertTrue(entries[0]["fallback_used"])
-            self.assertIn("card-player fallback", entries[0]["thinking"])
+            self.assertIn("advisor fallback", entries[0]["thinking"])
 
     def test_provider_prompt_uses_only_that_player_recent_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

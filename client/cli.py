@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import select
 import sys
 import time
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ RANK_SORT_ORDER = {
     for index, rank in enumerate(("2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "SJ", "BJ"))
 }
 SUIT_SORT_ORDER = {suit: index for index, suit in enumerate(("S", "H", "D", "C"))}
+HIDDEN_EVENT_TYPES = {"ActionPrompted"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +65,7 @@ class CliSession:
     npc_metadata: dict[str, str]
 
 
-InputFn = Callable[[str], str]
+InputFn = Callable[[str], str | None]
 OutputFn = Callable[[str], None]
 
 
@@ -157,7 +159,7 @@ def _run_play(
 ) -> CliResult:
     session, public_snapshot = prepare_default_table(client, args)
     emit(f"Table {session.table_id} | You are {session.human_seat}")
-    emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
+    emit(format_public_snapshot(public_snapshot, viewer_seat=session.human_seat, npc_metadata=session.npc_metadata).rstrip())
     public_snapshot = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
 
     while public_snapshot.get("phase") == "PLAYING":
@@ -173,13 +175,22 @@ def _run_play(
         seat_snapshot = client.seat_snapshot(session.table_id, session.human_seat, session.human_controller_id)
         emit(format_seat_snapshot(seat_snapshot, npc_metadata=session.npc_metadata).rstrip())
         try:
-            raw_command = input_fn("guandan> ")
+            raw_command = read_command(input_fn, "guandan> ", input_deadline_epoch_ms(seat_snapshot))
         except EOFError:
             emit("Quit.")
             break
         latest_snapshot = client.table_snapshot(session.table_id)
         if latest_snapshot.get("phase") != "PLAYING":
             public_snapshot = latest_snapshot
+            continue
+        if raw_command is None:
+            public_snapshot = refresh_after_input_timeout(
+                client,
+                session,
+                latest_snapshot,
+                emit,
+                args.max_bot_actions,
+            )
             continue
         if _human_turn_elapsed(latest_snapshot, session):
             public_snapshot = drive_bot_turns(client, session, latest_snapshot, emit, args.max_bot_actions)
@@ -199,7 +210,7 @@ def _run_play(
             continue
         if command == "table":
             public_snapshot = client.table_snapshot(session.table_id)
-            emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
+            emit(format_public_snapshot(public_snapshot, viewer_seat=session.human_seat, npc_metadata=session.npc_metadata).rstrip())
             continue
         try:
             response = submit_human_command(client, session, command, seat_snapshot)
@@ -212,7 +223,7 @@ def _run_play(
         public_snapshot = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
 
     if public_snapshot.get("phase") != "PLAYING":
-        emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
+        emit(format_public_snapshot(public_snapshot, viewer_seat=session.human_seat, npc_metadata=session.npc_metadata).rstrip())
     return CliResult(0, "".join(output))
 
 
@@ -289,9 +300,60 @@ def _human_turn_elapsed(snapshot: JsonObject, session: CliSession) -> bool:
     return snapshot.get("phase") == "PLAYING" and snapshot_acting_seat(snapshot) != session.human_seat
 
 
+def refresh_after_input_timeout(
+    client: GuandanHttpClient,
+    session: CliSession,
+    snapshot: JsonObject,
+    emit: OutputFn,
+    max_bot_actions: int,
+) -> JsonObject:
+    current = snapshot
+    for attempt in range(20):
+        if current.get("phase") != "PLAYING":
+            return current
+        if _human_turn_elapsed(current, session):
+            return drive_bot_turns(client, session, current, emit, max_bot_actions)
+        if attempt < 19:
+            time.sleep(0.1)
+            current = client.table_snapshot(session.table_id)
+    return current
+
+
 def snapshot_acting_seat(snapshot: JsonObject) -> str | None:
     seat = snapshot.get("acting_seat") or snapshot.get("current_turn")
     return seat if isinstance(seat, str) else None
+
+
+def read_command(input_fn: InputFn, prompt: str, deadline_epoch_ms: int | None) -> str | None:
+    if input_fn is input and deadline_epoch_ms is not None:
+        return read_stdin_with_deadline(prompt, deadline_epoch_ms)
+    return input_fn(prompt)
+
+
+def read_stdin_with_deadline(prompt: str, deadline_epoch_ms: int) -> str | None:
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    timeout = max(0.0, (deadline_epoch_ms - int(time.time() * 1000)) / 1000)
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], timeout)
+    except (OSError, ValueError):
+        return input("")
+    if not readable:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return None
+    line = sys.stdin.readline()
+    if line == "":
+        raise EOFError
+    return line.rstrip("\n")
+
+
+def input_deadline_epoch_ms(seat_snapshot: JsonObject) -> int | None:
+    public = seat_snapshot.get("public")
+    if not isinstance(public, dict):
+        return None
+    deadline = public.get("action_deadline_epoch_ms")
+    return deadline if isinstance(deadline, int) else None
 
 
 def submit_human_command(
@@ -331,7 +393,10 @@ def format_public_snapshot(
     if timer is not None:
         lines.append(f"Timer: {timer}")
     metadata = npc_metadata or {}
-    lines.append("Players: " + " | ".join(format_seat_summary(seat.value, seats, hand_counts, metadata) for seat in SEATS))
+    lines.append(
+        "Players: "
+        + " | ".join(format_seat_summary(seat.value, seats, hand_counts, metadata, viewer_seat) for seat in SEATS)
+    )
     finish_order = snapshot.get("finish_order") or ()
     if finish_order:
         lines.append("Finish: " + " ".join(str(seat) for seat in finish_order))
@@ -345,13 +410,25 @@ def format_seat_snapshot(snapshot: JsonObject, *, npc_metadata: dict[str, str] |
     return "\n".join(lines) + "\n"
 
 
-def format_seat_summary(seat: str, seats: object, hand_counts: object, npc_metadata: dict[str, str] | None = None) -> str:
+def format_seat_summary(
+    seat: str,
+    seats: object,
+    hand_counts: object,
+    npc_metadata: dict[str, str] | None = None,
+    viewer_seat: object = None,
+) -> str:
     player = seats.get(seat) if isinstance(seats, dict) else None
     name = player.get("display_name", "-") if isinstance(player, dict) else "-"
+    mark = format_friend_mark(seat, viewer_seat)
     count = hand_counts.get(seat, 0) if isinstance(hand_counts, dict) else 0
     metadata = (npc_metadata or {}).get(seat)
     suffix = f" [{metadata}]" if metadata else ""
-    return f"{seat} {name} {count}{suffix}"
+    return f"{seat}{mark} {name} {count}{suffix}"
+
+
+def format_friend_mark(seat: str, viewer_seat: object) -> str:
+    partners = {"E": "W", "W": "E", "S": "N", "N": "S"}
+    return "(F)" if partners.get(str(viewer_seat)) == seat else ""
 
 
 def format_npc_metadata(policy: object) -> str:
@@ -367,9 +444,10 @@ def format_npc_metadata(policy: object) -> str:
 
 def format_command_response(response: JsonObject) -> str:
     events = response.get("events", [])
-    if not events:
+    visible_events = [event for event in events if isinstance(event, dict) and event.get("type") not in HIDDEN_EVENT_TYPES]
+    if not visible_events:
         return "No events.\n"
-    return "\n".join(format_event(event) for event in events) + "\n"
+    return "\n".join(format_event(event) for event in visible_events) + "\n"
 
 
 def format_event(event: JsonObject) -> str:

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from client.api import ActionRequest, JsonObject
 from npc.common.player import Player
 from npc.dummy_bot.policy import DummyBotPolicy
-from npc.llm_agent.card_player import CardPlayerAdvisor
+from npc.llm_agent.actions import validate_action
+from npc.llm_agent.advisor import ActionAdvisor
 from npc.llm_agent.config import LlmAgentConfig
+from npc.llm_agent.context import (
+    AgentRequestContext,
+    public_value,
+    safe_snapshot,
+    seat_from_request,
+    snapshot_value,
+    team_for_seat,
+)
 from npc.llm_agent.personality import personality_context
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 from npc.llm_agent.provider import LlmActionProvider, provider_from_config
@@ -22,6 +30,7 @@ class DecisionContext:
     """Prepared inputs shared by model prompting, advisor fallback, and logging."""
 
     request: ActionRequest
+    request_context: AgentRequestContext
     memory_store: JsonMemoryStore
     action_log: JsonActionLog
     memory: JsonObject
@@ -30,12 +39,12 @@ class DecisionContext:
 
 
 class LlmAgentPlayer(Player):
-    """Broker-compatible LLM NPC policy with isolated filesystem memory."""
+    """Broker-compatible LLM NPC player with isolated filesystem memory."""
 
     def __init__(self, config: LlmAgentConfig | None = None, provider: LlmActionProvider | None = None) -> None:
         self.config = config or LlmAgentConfig()
         self.provider = provider or provider_from_config(self.config)
-        self._card_player = CardPlayerAdvisor()
+        self._advisor = ActionAdvisor()
         self._fallback = DummyBotPolicy()
         self._stores_by_seat: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
 
@@ -51,39 +60,39 @@ class LlmAgentPlayer(Player):
         return action_with_thinking
 
     def _prepare_decision(self, request: ActionRequest) -> DecisionContext:
-        seat = _seat_from_request(request)
-        memory_store, action_log = self._stores_for(seat)
+        request_context = AgentRequestContext.from_request(request)
+        memory_store, action_log = self._stores_for(request_context.seat)
         memory = memory_store.load()
         personality = personality_context(self.config.personality)
-        table_context = _table_context(request)
-        strategy_context = build_strategy_context(request, table_context)
+        strategy_context = build_strategy_context(request_context)
         strategy_context["personality"] = personality
-        card_player_advice = self._card_player.build_advice(request, strategy_context)
+        advisor_advice = self._advisor.build_advice(request_context, strategy_context)
         provider_prompt = self._build_provider_prompt(
             request,
             memory,
             action_log,
-            table_context=table_context,
+            table_context=request_context.table_context,
             strategy_context=strategy_context,
-            card_player=card_player_advice.to_json(),
+            card_player=advisor_advice.to_json(),
             personality=personality,
         )
         return DecisionContext(
             request=request,
+            request_context=request_context,
             memory_store=memory_store,
             action_log=action_log,
             memory=memory,
             provider_prompt=provider_prompt,
-            advisor_action=card_player_advice.recommended_action,
+            advisor_action=advisor_advice.recommended_action,
         )
 
     def _select_action(self, provider_action: JsonObject, context: DecisionContext) -> tuple[JsonObject, JsonObject, bool]:
-        model_action = self._validated_action(provider_action, context.request)
+        model_action = validate_action(provider_action, context.request_context)
         if model_action is not None:
             return model_action, provider_action, False
 
-        fallback_action = self._validated_action(context.advisor_action, context.request)
-        fallback_source = "card-player"
+        fallback_action = validate_action(context.advisor_action, context.request_context)
+        fallback_source = "advisor"
         if fallback_action is None:
             fallback_action = self._fallback.choose_action(context.request)
             fallback_source = "dummy bot"
@@ -101,18 +110,18 @@ class LlmAgentPlayer(Player):
         fallback_used: bool,
     ) -> None:
         request = context.request
-        seat = _seat_from_request(request)
+        seat = context.request_context.seat
         context.action_log.append(
             {
                 "kind": "decision",
                 "request_id": request.request_id,
-                "table_id": _snapshot_value(request, "table_id"),
+                "table_id": snapshot_value(request, "table_id"),
                 "seat": seat,
-                "event_seq": _public_value(request, "event_seq"),
-                "phase": _public_value(request, "phase"),
-                "current_level": request.prompt.get("current_level") or _public_value(request, "current_level"),
+                "event_seq": public_value(request, "event_seq"),
+                "phase": public_value(request, "phase"),
+                "current_level": request.prompt.get("current_level") or public_value(request, "current_level"),
                 "legal_action": request.prompt.get("kind"),
-                "snapshot": _safe_snapshot(request.snapshot),
+                "snapshot": safe_snapshot(request.snapshot),
                 "selected_action": action,
                 "thinking": thinking,
                 "fallback_used": fallback_used,
@@ -199,36 +208,6 @@ class LlmAgentPlayer(Player):
             return {"type": "error", "message": str(exc)}
         return action if isinstance(action, dict) else {"type": "error", "message": "provider returned non-object"}
 
-    def _validated_action(self, action: JsonObject, request: ActionRequest) -> JsonObject | None:
-        action_type = action.get("type")
-        prompt_kind = request.prompt.get("kind")
-        hand = tuple(str(card_id) for card_id in request.snapshot.get("hand", []))
-
-        if action_type == "pass":
-            return {"type": "pass"} if prompt_kind == "play_or_pass" else None
-        if action_type == "play_cards":
-            if prompt_kind not in {"lead", "play_or_pass"}:
-                return None
-            card_ids = tuple(str(card_id) for card_id in action.get("card_ids", []))
-            if not card_ids or len(set(card_ids)) != len(card_ids) or not set(card_ids).issubset(set(hand)):
-                return None
-            normalized: JsonObject = {"type": "play_cards", "card_ids": list(card_ids)}
-            declared_type = action.get("declared_type")
-            if declared_type is not None:
-                normalized["declared_type"] = str(declared_type)
-            return normalized
-        if action_type == "submit_tribute":
-            if prompt_kind != "tribute":
-                return None
-            card_id = str(action.get("card_id", ""))
-            return {"type": "submit_tribute", "card_id": card_id} if card_id in hand else None
-        if action_type == "return_tribute":
-            if prompt_kind != "return_tribute":
-                return None
-            card_id = str(action.get("card_id", ""))
-            return {"type": "return_tribute", "card_id": card_id} if card_id in hand else None
-        return None
-
     def _update_memory(
         self,
         memory_store: JsonMemoryStore,
@@ -247,7 +226,7 @@ class LlmAgentPlayer(Player):
             if isinstance(skills, list):
                 memory["skills"] = _merge_skills(memory.get("skills"), skills)
         if request is not None:
-            memory["player_name"] = self.config.display_name_for(_seat_from_request(request))
+            memory["player_name"] = self.config.display_name_for(seat_from_request(request))
         _apply_score_events(memory, events or [])
         memory_store.save(memory)
 
@@ -278,7 +257,7 @@ def _apply_score_events(memory: JsonObject, events: list[JsonObject]) -> None:
                 score["last_finish_order"] = finish_order
             seat = memory.get("seat")
             winning_team = payload.get("winning_team")
-            if isinstance(seat, str) and _team_for_seat(seat) == winning_team:
+            if isinstance(seat, str) and team_for_seat(seat) == winning_team:
                 score["wins"] = int(score.get("wins", 0)) + 1
         elif event.get("type") == "LevelAdvanced":
             levels = score.get("level_by_team")
@@ -291,65 +270,6 @@ def _apply_score_events(memory: JsonObject, events: list[JsonObject]) -> None:
                 levels[team] = next_level
             score["level_by_team"] = levels
     memory["score"] = score
-
-
-def _team_for_seat(seat: str) -> str:
-    return "EW" if seat in {"E", "W"} else "SN"
-
-
-def _partner_for_seat(seat: str | None) -> str | None:
-    return {"E": "W", "W": "E", "S": "N", "N": "S"}.get(seat or "")
-
-
-def _opponents_for_seat(seat: str | None) -> tuple[str, ...]:
-    team = _team_for_seat(seat) if seat in {"E", "S", "W", "N"} else None
-    if team == "EW":
-        return ("S", "N")
-    if team == "SN":
-        return ("E", "W")
-    return ()
-
-
-def _table_context(request: ActionRequest) -> JsonObject:
-    seat = _seat_from_request(request)
-    public = request.snapshot.get("public")
-    public_snapshot = public if isinstance(public, dict) else {}
-    return {
-        "seat": seat,
-        "team": _team_for_seat(seat) if seat in {"E", "S", "W", "N"} else None,
-        "partner": _partner_for_seat(seat),
-        "opponents": list(_opponents_for_seat(seat)),
-        "prompt_kind": request.prompt.get("kind"),
-        "current_level": request.prompt.get("current_level") or public_snapshot.get("current_level"),
-        "current_turn": public_snapshot.get("current_turn"),
-        "acting_seat": public_snapshot.get("acting_seat") or public_snapshot.get("current_turn"),
-        "hand_counts": public_snapshot.get("hand_counts", {}),
-        "finish_order": public_snapshot.get("finish_order", []),
-    }
-
-
-def _seat_from_request(request: ActionRequest) -> str | None:
-    seat = request.snapshot.get("seat")
-    return str(seat) if seat is not None else None
-
-
-def _snapshot_value(request: ActionRequest, key: str) -> object:
-    return request.snapshot.get(key)
-
-
-def _public_value(request: ActionRequest, key: str) -> object:
-    public = request.snapshot.get("public")
-    return public.get(key) if isinstance(public, dict) else None
-
-
-def _safe_snapshot(snapshot: JsonObject) -> JsonObject:
-    public = snapshot.get("public")
-    return {
-        "table_id": snapshot.get("table_id"),
-        "seat": snapshot.get("seat"),
-        "hand": list(snapshot.get("hand", [])),
-        "public": public if isinstance(public, dict) else {},
-    }
 
 
 def _events_from_observation(observation: JsonObject) -> list[JsonObject]:

@@ -2,39 +2,20 @@ from __future__ import annotations
 
 from collections import Counter
 
-from client.api import ActionRequest, JsonObject
-from server.domain.cards import CARD_BY_ID, Rank
+from client.api import JsonObject
+from npc.llm_agent.context import AgentRequestContext, rank, rank_value, suit
 
 
-RANK_STRENGTH = {
-    "2": 0,
-    "3": 1,
-    "4": 2,
-    "5": 3,
-    "6": 4,
-    "7": 5,
-    "8": 6,
-    "9": 7,
-    "10": 8,
-    "J": 9,
-    "Q": 10,
-    "K": 11,
-    "A": 12,
-    "SJ": 14,
-    "BJ": 15,
-}
-
-
-def build_strategy_context(request: ActionRequest, table_context: JsonObject) -> JsonObject:
-    hand = tuple(str(card_id) for card_id in request.snapshot.get("hand", []))
+def build_strategy_context(context: AgentRequestContext) -> JsonObject:
+    hand = context.hand
     counts = _rank_counts(hand)
     singles = sum(1 for count in counts.values() if count == 1)
     bombs = _bomb_count(counts)
-    controls = _control_count(hand, str(table_context.get("current_level") or "2"))
+    controls = _control_count(hand, context.current_level)
     hand_count = len(hand)
-    partner = table_context.get("partner")
-    opponents = table_context.get("opponents", [])
-    hand_counts = table_context.get("hand_counts", {})
+    partner = context.table_context.get("partner")
+    opponents = context.table_context.get("opponents", [])
+    hand_counts = context.table_context.get("hand_counts", {})
     partner_count = _seat_count(hand_counts, partner)
     opponent_counts = [
         count
@@ -53,7 +34,7 @@ def build_strategy_context(request: ActionRequest, table_context: JsonObject) ->
             "pair_or_triple_rank_count": sum(1 for count in counts.values() if count in {2, 3}),
             "bomb_count": bombs,
             "control_card_count": controls,
-            "red_heart_level_count": _red_heart_level_count(hand, str(table_context.get("current_level") or "2")),
+            "red_heart_level_count": _red_heart_level_count(hand, context.current_level),
         },
         "pressure": {
             "partner_card_count": partner_count,
@@ -66,7 +47,7 @@ def build_strategy_context(request: ActionRequest, table_context: JsonObject) ->
 
 
 def _rank_counts(card_ids: tuple[str, ...]) -> Counter[str]:
-    return Counter(_rank(card_id) for card_id in card_ids)
+    return Counter(rank(card_id) for card_id in card_ids)
 
 
 def _bomb_count(counts: Counter[str]) -> int:
@@ -78,30 +59,14 @@ def _control_count(card_ids: tuple[str, ...], level: str) -> int:
 
 
 def _red_heart_level_count(card_ids: tuple[str, ...], level: str) -> int:
-    return sum(1 for card_id in card_ids if _suit(card_id) == "H" and _rank(card_id) == level)
+    return sum(1 for card_id in card_ids if suit(card_id) == "H" and rank(card_id) == level)
 
 
 def _is_control_card(card_id: str, level: str) -> bool:
-    rank = _rank(card_id)
-    if rank in {"SJ", "BJ"}:
+    card_rank = rank(card_id)
+    if card_rank in {"SJ", "BJ"}:
         return True
-    return rank == level or RANK_STRENGTH.get(rank, -1) >= RANK_STRENGTH["A"]
-
-
-def _rank(card_id: str) -> str:
-    card = CARD_BY_ID.get(card_id)
-    if card is not None:
-        return card.rank.value
-    parts = card_id.split("-")
-    return parts[-1] if parts else card_id
-
-
-def _suit(card_id: str) -> str | None:
-    card = CARD_BY_ID.get(card_id)
-    if card is not None:
-        return card.suit.value if card.suit is not None else None
-    parts = card_id.split("-")
-    return parts[1] if len(parts) == 3 else None
+    return card_rank == level or rank_value(card_rank, level) >= rank_value("A", level)
 
 
 def _seat_count(hand_counts: object, seat: object) -> int | None:
