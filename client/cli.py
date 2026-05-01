@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from client.api import GuandanClientError, GuandanHttpClient, JsonObject
-from npc.broker.broker import NpcBroker
-from npc.dummy_bot.policy import DummyBotPolicy
+from npc.broker.broker import NPC_LINEUPS, NpcBroker
 from server.domain.seats import SEATS
 
 
@@ -61,6 +60,7 @@ class CliSession:
     human_seat: str
     human_controller_id: str
     bot_broker: NpcBroker
+    npc_metadata: dict[str, str]
 
 
 InputFn = Callable[[str], str]
@@ -120,6 +120,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=128,
         help="Safety limit for consecutive automatic bot turns.",
     )
+    play.add_argument(
+        "--npc-lineup",
+        choices=NPC_LINEUPS,
+        default="mixed",
+        help="NPC lineup for broker-controlled seats.",
+    )
+    play.add_argument(
+        "--npc-player-config",
+        help="JSON file for default NPC player names and kinds.",
+    )
 
     snapshot = subparsers.add_parser("snapshot", help="Print a public table snapshot.")
     _add_connection_args(snapshot, default_base_url)
@@ -146,8 +156,8 @@ def _run_play(
     output: list[str],
 ) -> CliResult:
     session, public_snapshot = prepare_default_table(client, args)
-    emit(f"Connected to table {session.table_id} as seat {session.human_seat}.")
-    emit(format_public_snapshot(public_snapshot).rstrip())
+    emit(f"Table {session.table_id} | You are {session.human_seat}")
+    emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
     public_snapshot = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
 
     while public_snapshot.get("phase") == "PLAYING":
@@ -155,18 +165,26 @@ def _run_play(
         if acting_seat != session.human_seat:
             updated = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
             if updated == public_snapshot:
-                emit(f"Waiting for seat {acting_seat}.")
+                emit(f"Waiting for {acting_seat}.")
                 break
             public_snapshot = updated
             continue
 
         seat_snapshot = client.seat_snapshot(session.table_id, session.human_seat, session.human_controller_id)
-        emit(format_seat_snapshot(seat_snapshot).rstrip())
+        emit(format_seat_snapshot(seat_snapshot, npc_metadata=session.npc_metadata).rstrip())
         try:
             raw_command = input_fn("guandan> ")
         except EOFError:
             emit("Quit.")
             break
+        latest_snapshot = client.table_snapshot(session.table_id)
+        if latest_snapshot.get("phase") != "PLAYING":
+            public_snapshot = latest_snapshot
+            continue
+        if _human_turn_elapsed(latest_snapshot, session):
+            public_snapshot = drive_bot_turns(client, session, latest_snapshot, emit, args.max_bot_actions)
+            continue
+        public_snapshot = latest_snapshot
         command = raw_command.strip()
         if not command:
             continue
@@ -177,11 +195,11 @@ def _run_play(
             emit(help_text().rstrip())
             continue
         if command == "hand":
-            emit(format_seat_snapshot(seat_snapshot).rstrip())
+            emit(format_seat_snapshot(seat_snapshot, npc_metadata=session.npc_metadata).rstrip())
             continue
         if command == "table":
             public_snapshot = client.table_snapshot(session.table_id)
-            emit(format_public_snapshot(public_snapshot).rstrip())
+            emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
             continue
         try:
             response = submit_human_command(client, session, command, seat_snapshot)
@@ -194,7 +212,7 @@ def _run_play(
         public_snapshot = drive_bot_turns(client, session, public_snapshot, emit, args.max_bot_actions)
 
     if public_snapshot.get("phase") != "PLAYING":
-        emit(format_public_snapshot(public_snapshot).rstrip())
+        emit(format_public_snapshot(public_snapshot, npc_metadata=session.npc_metadata).rstrip())
     return CliResult(0, "".join(output))
 
 
@@ -218,10 +236,12 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
 
     bot_broker = NpcBroker(client, table_id)
     seats = public_snapshot.get("seats", {})
-    for seat in [seat.value for seat in SEATS if seat.value != human_seat]:
-        if seat in seats:
-            continue
-        bot_broker.add_seat(seat, DummyBotPolicy(), display_name=f"Dummy {seat}")
+    broker_seats = bot_broker.add_default_players(
+        [seat.value for seat in SEATS if seat.value != human_seat and seat.value not in seats],
+        lineup=args.npc_lineup,
+        config_path=args.npc_player_config,
+    )
+    npc_metadata = {broker_seat.seat: format_npc_metadata(broker_seat.policy) for broker_seat in broker_seats}
 
     client.ready(table_id, human_seat, human_controller_id)
     bot_broker.join_and_ready_all()
@@ -230,7 +250,7 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
     if public_snapshot.get("phase") != "PLAYING":
         response = client.start(table_id, seed=args.seed)
         public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)
-    return CliSession(table_id, human_seat, human_controller_id, bot_broker), public_snapshot
+    return CliSession(table_id, human_seat, human_controller_id, bot_broker, npc_metadata), public_snapshot
 
 
 def drive_bot_turns(
@@ -265,6 +285,10 @@ def drive_bot_turns(
     return current
 
 
+def _human_turn_elapsed(snapshot: JsonObject, session: CliSession) -> bool:
+    return snapshot.get("phase") == "PLAYING" and snapshot_acting_seat(snapshot) != session.human_seat
+
+
 def snapshot_acting_seat(snapshot: JsonObject) -> str | None:
     seat = snapshot.get("acting_seat") or snapshot.get("current_turn")
     return seat if isinstance(seat, str) else None
@@ -290,35 +314,55 @@ def submit_human_command(
     raise GuandanClientError(None, f"unsupported command: {command}")
 
 
-def format_public_snapshot(snapshot: JsonObject, *, viewer_seat: object = None) -> str:
+def format_public_snapshot(
+    snapshot: JsonObject,
+    *,
+    viewer_seat: object = None,
+    npc_metadata: dict[str, str] | None = None,
+) -> str:
     seats = snapshot.get("seats", {})
     hand_counts = snapshot.get("hand_counts", {})
-    header = f"Table {snapshot.get('table_id', '-')} | Phase {snapshot.get('phase', '-')}"
+    header = f"{snapshot.get('phase', '-')}"
     if viewer_seat is not None:
         header += f" | Seat {viewer_seat}"
-    lines = [header, f"Seq: {snapshot.get('event_seq', '-')} | Turn: {snapshot.get('current_turn') or '-'}"]
+    header += f" | Turn {snapshot.get('current_turn') or '-'}"
+    lines = [header]
     timer = format_timer(snapshot)
     if timer is not None:
         lines.append(f"Timer: {timer}")
-    lines.append("Seats: " + " | ".join(format_seat_summary(seat.value, seats, hand_counts) for seat in SEATS))
+    metadata = npc_metadata or {}
+    lines.append("Players: " + " | ".join(format_seat_summary(seat.value, seats, hand_counts, metadata) for seat in SEATS))
     finish_order = snapshot.get("finish_order") or ()
     if finish_order:
         lines.append("Finish: " + " ".join(str(seat) for seat in finish_order))
     return "\n".join(lines) + "\n"
 
 
-def format_seat_snapshot(snapshot: JsonObject) -> str:
-    lines = [format_public_snapshot(snapshot["public"], viewer_seat=snapshot.get("seat")).rstrip()]
-    lines.append(f"Legal action: {snapshot.get('legal_action') or '-'}")
+def format_seat_snapshot(snapshot: JsonObject, *, npc_metadata: dict[str, str] | None = None) -> str:
+    lines = [format_public_snapshot(snapshot["public"], viewer_seat=snapshot.get("seat"), npc_metadata=npc_metadata).rstrip()]
+    lines.append(f"Action: {snapshot.get('legal_action') or '-'}")
     lines.append("Hand: " + format_hand(snapshot.get("hand", ())))
     return "\n".join(lines) + "\n"
 
 
-def format_seat_summary(seat: str, seats: object, hand_counts: object) -> str:
+def format_seat_summary(seat: str, seats: object, hand_counts: object, npc_metadata: dict[str, str] | None = None) -> str:
     player = seats.get(seat) if isinstance(seats, dict) else None
     name = player.get("display_name", "-") if isinstance(player, dict) else "-"
     count = hand_counts.get(seat, 0) if isinstance(hand_counts, dict) else 0
-    return f"{seat} {name} ({count})"
+    metadata = (npc_metadata or {}).get(seat)
+    suffix = f" [{metadata}]" if metadata else ""
+    return f"{seat} {name} {count}{suffix}"
+
+
+def format_npc_metadata(policy: object) -> str:
+    config = getattr(policy, "config", None)
+    if config is None:
+        return ""
+    provider = str(getattr(config, "provider_name", "") or "").strip()
+    model = str(getattr(config, "model_name", "") or "").strip()
+    if provider and model:
+        return f"{provider}/{model}"
+    return provider or model
 
 
 def format_command_response(response: JsonObject) -> str:

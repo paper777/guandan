@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from client.api import ActionRequest, JsonObject
+from npc.common.player import Player
 
 
 RANKS = ("2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A")
 
 
-class DummyBotPolicy:
+class DummyBotPolicy(Player):
     """Minimal policy: pass when possible, lead the lowest card when forced."""
 
     def choose_action(self, request: ActionRequest) -> JsonObject:

@@ -26,10 +26,8 @@ Key commands:
 - `python -m venv .venv && source .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[dev]"`: install the server and NPC packages with development dependencies.
 - `uv sync --dev`: create/update the uv-managed virtual environment from root `pyproject.toml` and `uv.lock`.
-- `python3 -m unittest discover -s tests`: run the no-dependency server test suite.
-- `python3 -m unittest discover -s npc`: run the no-dependency NPC test suite.
-- `uv run python -m unittest discover -s tests`: run server tests through the uv-managed environment.
-- `uv run python -m unittest discover -s npc`: run NPC tests through the uv-managed environment.
+- `python3 -m unittest discover -s tests`: run the no-dependency server and NPC test suite.
+- `uv run python -m unittest discover -s tests`: run server and NPC tests through the uv-managed environment.
 - `pytest`: run the full test suite after installing `.[dev]`.
 - `pytest tests/domain`: run rule-engine tests.
 - `uv run guandan-server --reload`: run the local API server through the packaged entrypoint.

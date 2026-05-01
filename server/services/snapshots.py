@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from server.domain.cards import Rank
 from server.domain.controllers import ControllerCapability
+from server.domain.hand_types import PlayedHand
 from server.domain.seats import Seat
 from server.domain.state import MatchPhase, MatchState
 
@@ -29,6 +30,7 @@ class PublicTableSnapshot:
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None
+    current_trick: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +55,9 @@ def public_snapshot(
         hand_counts = {seat: len(hand) for seat, hand in state.deal.hands.items()}
         current_turn = state.deal.turn
         finish_order = state.deal.finish_order
+        current_trick = _public_trick(state.deal.current_trick.last_play, state.deal.current_trick.last_play_seat)
+    else:
+        current_trick = None
     seats = {
         seat: PublicPlayer(
             player_id=player.id,
@@ -74,6 +79,7 @@ def public_snapshot(
         action_deadline_epoch_ms=action_deadline_epoch_ms,
         action_timeout_seconds=action_timeout_seconds,
         acting_seat=acting_seat,
+        current_trick=current_trick,
     )
 
 
@@ -121,3 +127,15 @@ def seat_snapshot(
         hand=hand,
         legal_action=legal_action,
     )
+
+
+def _public_trick(last_play: PlayedHand | None, last_play_seat: Seat | None) -> dict[str, object] | None:
+    if last_play is None or last_play_seat is None:
+        return None
+    return {
+        "last_play_seat": last_play_seat.value,
+        "card_ids": list(last_play.card_ids),
+        "hand_type": last_play.type.value,
+        "primary_rank": last_play.primary_rank.value,
+        "length": last_play.length,
+    }

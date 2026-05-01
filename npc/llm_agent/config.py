@@ -11,13 +11,19 @@ class LlmAgentConfig:
     player_name: str | None = None
     player_id: str | None = None
     seat: str | None = None
+    personality: str = "balanced"
     storage_dir: str | Path = Path("npc/llm_agent/data")
     memory_path: str | Path | None = None
     action_log_path: str | Path | None = None
     provider_name: str = "deterministic"
     model_name: str = "deterministic-guandan-v1"
+    api_key: str | None = None
+    api_base_url: str | None = None
+    codex_binary: str = "codex"
+    codex_working_dir: str | Path | None = None
     timeout_seconds: float = 3.0
     temperature: float = 0.2
+    max_output_tokens: int = 800
     max_recent_actions: int = 20
 
     def namespace_for(self, seat: str | None = None) -> str:

@@ -48,6 +48,7 @@ class PublicTableSnapshotSchema(BaseModel):
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None
+    current_trick: dict[str, Any] | None = None
 
     @classmethod
     def from_snapshot(cls, snapshot: PublicTableSnapshot) -> PublicTableSnapshotSchema:

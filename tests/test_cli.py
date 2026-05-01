@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from client.api import GuandanClientError
 from client.cli import (
@@ -8,6 +11,7 @@ from client.cli import (
     drive_bot_turns,
     format_card_id,
     format_hand,
+    format_npc_metadata,
     format_public_snapshot,
     format_seat_snapshot,
     resolve_card_inputs,
@@ -108,20 +112,22 @@ class FakeClient:
 
 
 class CliTests(unittest.TestCase):
-    def test_default_play_creates_human_and_three_broker_agents(self) -> None:
+    def test_default_play_creates_human_and_three_mixed_broker_agents(self) -> None:
         client = FakeClient()
 
         result = run_cli([], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Connected to table table-1 as seat E.", result.output)
-        self.assertIn("Table table-1 | Phase PLAYING | Seat E", result.output)
-        self.assertIn("Seats: E human-E (3) | S Dummy S (1) | W Dummy W (1) | N Dummy N (1)", result.output)
+        self.assertIn("Table table-1 | You are E", result.output)
+        self.assertIn("PLAYING | Seat E | Turn E", result.output)
+        self.assertIn("Players: E human-E 3 | S Jade 1 [", result.output)
+        self.assertIn("W River 1 [", result.output)
+        self.assertIn("N Atlas 1 [", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "human-E"), client.calls)
-        self.assertIn(("join_agent", "table-1", "S", "Dummy S"), client.calls)
-        self.assertIn(("join_agent", "table-1", "W", "Dummy W"), client.calls)
-        self.assertIn(("join_agent", "table-1", "N", "Dummy N"), client.calls)
+        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
+        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
+        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
         self.assertNotIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
         self.assertIn(("start", "table-1", "cli-demo"), client.calls)
 
@@ -129,7 +135,7 @@ class CliTests(unittest.TestCase):
         client = FakeClient()
         commands = iter(["play C3", "quit"])
 
-        result = run_cli([], input_fn=lambda prompt: next(commands), client=client)
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: next(commands), client=client)
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn(("play_cards", "table-1", "E", "human-controller-E", ("D1-C-3",), None), client.calls)
@@ -140,6 +146,77 @@ class CliTests(unittest.TestCase):
         self.assertIn("2: S passed", result.output)
         self.assertIn("3: W passed", result.output)
         self.assertIn("4: N passed", result.output)
+
+    def test_human_timeout_refreshes_before_processing_input_and_prints_bot_actions(self) -> None:
+        client = FakeClient()
+        commands = iter(["", "quit"])
+        timed_out = False
+
+        def input_after_timeout(prompt):
+            nonlocal timed_out
+            if not timed_out and client.current_turn == "E":
+                timed_out = True
+                client.current_turn = "S"
+                client.event_seq += 1
+            return next(commands)
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=input_after_timeout, client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("pass_turn", "table-1", "S", "agent-controller-S"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "W", "agent-controller-W"), client.calls)
+        self.assertIn(("pass_turn", "table-1", "N", "agent-controller-N"), client.calls)
+        self.assertIn("2: S passed", result.output)
+        self.assertIn("3: W passed", result.output)
+        self.assertIn("4: N passed", result.output)
+
+    def test_cli_dummy_lineup_uses_named_dummy_players(self) -> None:
+        client = FakeClient()
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: "quit", client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
+        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
+        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
+
+    def test_cli_llm_lineup_uses_named_llm_players(self) -> None:
+        client = FakeClient()
+
+        result = run_cli(["--npc-lineup", "llm"], input_fn=lambda prompt: "quit", client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
+        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
+        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
+
+    def test_cli_uses_custom_npc_player_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "players.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "players": [
+                            {"seat": "S", "display_name": "South Config", "kind": "dummy"},
+                            {"seat": "W", "display_name": "West Config", "kind": "dummy"},
+                            {"seat": "N", "display_name": "North Config", "kind": "dummy"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            client = FakeClient()
+
+            result = run_cli(
+                ["--npc-player-config", str(path), "--npc-lineup", "mixed"],
+                input_fn=lambda prompt: "quit",
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("join_agent", "table-1", "S", "South Config"), client.calls)
+        self.assertIn(("join_agent", "table-1", "W", "West Config"), client.calls)
+        self.assertIn(("join_agent", "table-1", "N", "North Config"), client.calls)
 
     def test_card_formatter_hides_first_deck_and_uses_suit_emoji(self) -> None:
         self.assertEqual(format_card_id("D1-S-3"), "♠️ 3")
@@ -184,7 +261,7 @@ class CliTests(unittest.TestCase):
 
         snapshot = drive_bot_turns(
             client,
-            CliSession("table-1", "E", "human-controller-E", RaceBroker()),
+            CliSession("table-1", "E", "human-controller-E", RaceBroker(), {}),
             client._snapshot(),
             output.append,
             4,
@@ -192,6 +269,16 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(snapshot["current_turn"], "S")
         self.assertEqual(output, [])
+
+    def test_format_npc_metadata_shows_llm_provider_and_model(self) -> None:
+        class Policy:
+            config = type(
+                "Config",
+                (),
+                {"provider_name": "codex-cli", "model_name": "gpt-5.2"},
+            )()
+
+        self.assertEqual(format_npc_metadata(Policy()), "codex-cli/gpt-5.2")
 
     def test_public_snapshot_shows_timer_when_deadline_is_present(self) -> None:
         output = format_public_snapshot(
@@ -208,6 +295,7 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("Timer:", output)
+        self.assertIn("PLAYING | Turn E", output)
 
     def test_seat_snapshot_merges_header_and_seats(self) -> None:
         output = format_seat_snapshot(
@@ -227,8 +315,8 @@ class CliTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Table table-1 | Phase PLAYING | Seat E", output)
-        self.assertIn("Seats: E East (3) | S South (4) | W - (0) | N - (0)", output)
+        self.assertIn("PLAYING | Seat E | Turn E", output)
+        self.assertIn("Players: E East 3 | S South 4 | W - 0 | N - 0", output)
         self.assertNotIn("Your seat:", output)
 
 
