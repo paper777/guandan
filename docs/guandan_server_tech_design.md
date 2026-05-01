@@ -877,7 +877,7 @@ Still missing or incomplete:
 - Add reducer tests for every rejection code listed in the error model.
 - Add service tests for actor serialization, prompt generation, timeout fallback, slow-client-safe broadcasting, and event-store transaction boundaries.
 - Add API integration tests for four WebSocket clients completing a scripted deal, reconnect behavior, duplicate request IDs, mixed human/local-bot/external-agent seats, invalid agent responses, and restart-from-event-log.
-- Keep the no-dependency unittest suite runnable with `python3 -m unittest discover -s server/tests`; gate FastAPI/Hypothesis coverage behind `.[dev]` where needed.
+- Keep the no-dependency unittest suite runnable with `python3 -m unittest discover -s tests`; gate FastAPI/Hypothesis coverage behind `.[dev]` where needed.
 
 ### Operations and Security
 

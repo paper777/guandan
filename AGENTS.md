@@ -15,7 +15,7 @@ Source layout:
 - `server/services/`: table actor, lobby, replay, and snapshot filtering.
 - `server/persistence/`: SQLite models and repositories.
 - `npc/`: external NPC policy, broker, and policy server helpers.
-- `server/tests/`: unit, property, and integration tests mirroring source modules.
+- `tests/`: unit, property, and integration tests mirroring source modules.
 
 Keep rule logic independent from web, SQLite, and wall-clock time.
 
@@ -26,12 +26,12 @@ Key commands:
 - `python -m venv .venv && source .venv/bin/activate`: create and enter a local virtual environment.
 - `pip install -e ".[dev]"`: install the server and NPC packages with development dependencies.
 - `uv sync --dev`: create/update the uv-managed virtual environment from root `pyproject.toml` and `uv.lock`.
-- `python3 -m unittest discover -s server/tests`: run the no-dependency server test suite.
+- `python3 -m unittest discover -s tests`: run the no-dependency server test suite.
 - `python3 -m unittest discover -s npc`: run the no-dependency NPC test suite.
-- `uv run python -m unittest discover -s server/tests`: run server tests through the uv-managed environment.
+- `uv run python -m unittest discover -s tests`: run server tests through the uv-managed environment.
 - `uv run python -m unittest discover -s npc`: run NPC tests through the uv-managed environment.
 - `pytest`: run the full test suite after installing `.[dev]`.
-- `pytest server/tests/domain`: run rule-engine tests.
+- `pytest tests/domain`: run rule-engine tests.
 - `uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
 - `uv run uvicorn server.app.main:app --reload`: run the local API server directly with uvicorn.
 
@@ -45,7 +45,7 @@ Keep files focused. Rule parsing, comparison, reducer logic, controller adapters
 
 ## Testing Guidelines
 
-Use `pytest` for all tests and Hypothesis for rule invariants. Name tests `test_*.py`, and mirror the source path where practical, for example `server/tests/domain/test_comparator.py`.
+Use `pytest` for all tests and Hypothesis for rule invariants. Name tests `test_*.py`, and mirror the source path where practical, for example `tests/domain/test_comparator.py`.
 
 Prioritize tests for card conservation, legal hand parsing, bomb hierarchy, tribute flow, controller authorization, snapshot privacy, and replay determinism.
 

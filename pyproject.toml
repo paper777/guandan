@@ -65,5 +65,5 @@ npc = "npc"
 "npc.llm_agent" = "npc/llm_agent"
 
 [tool.pytest.ini_options]
-testpaths = ["server/tests", "npc"]
+testpaths = ["tests", "npc"]
 pythonpath = ["."]
