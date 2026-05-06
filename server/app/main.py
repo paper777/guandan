@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
+from server.services.public_events import public_events
 from server.services.table_config import TableConfig, TimeoutFallback
 from server.services.table_actor import TableActor
 
@@ -319,7 +320,7 @@ async def _dispatch(
     if result.rejection is not None:
         return 400, {"rejection": result.rejection, "event_seq": actor.state.event_seq}
     payload: dict[str, Any] = {
-        "events": list(result.events),
+        "events": list(public_events(result.events)),
         "event_seq": actor.state.event_seq,
         "snapshot": actor.public_snapshot(),
         "replayed": result.replayed,

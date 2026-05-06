@@ -148,6 +148,7 @@ def safe_snapshot(snapshot: JsonObject) -> JsonObject:
         "table_id": snapshot.get("table_id"),
         "seat": snapshot.get("seat"),
         "hand": list(snapshot.get("hand", [])),
+        "legal_card_ids": list(snapshot.get("legal_card_ids", [])),
         "public": public if isinstance(public, dict) else {},
     }
 

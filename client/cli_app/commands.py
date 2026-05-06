@@ -109,6 +109,11 @@ def normalized_card_label(value: str) -> tuple[str | None, str] | None:
         suit = SUIT_INPUT_ALIASES.get(parts[1])
         rank = normalize_rank(parts[2])
         return (suit, rank) if suit is not None and rank in RANK_SORT_ORDER else None
+    if len(parts) == 2:
+        suit = SUIT_INPUT_ALIASES.get(parts[0])
+        rank = normalize_rank(parts[1])
+        if suit is not None and rank in RANK_SORT_ORDER:
+            return (suit, rank)
 
     token = raw.replace("-", "").replace("_", "").replace(":", "").replace(" ", "")
     if not token:

@@ -128,6 +128,9 @@ class AppTests(unittest.TestCase):
             [event["type"] for event in body["events"]],
             ["MatchStarted", "DealStarted", "CardsDealt", "ActionPrompted"],
         )
+        cards_dealt = body["events"][2]
+        self.assertNotIn("hands", cards_dealt["payload"])
+        self.assertEqual(cards_dealt["payload"]["hand_counts"], {"E": 27, "N": 27, "S": 27, "W": 27})
         self.assertEqual(body["snapshot"]["phase"], "PLAYING")
         self.assertEqual(body["snapshot"]["acting_seat"], "E")
         self.assertIsNotNone(body["snapshot"]["action_deadline_epoch_ms"])
@@ -158,6 +161,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(body["seat"], "E")
         self.assertEqual(len(body["hand"]), 27)
         self.assertEqual(body["legal_action"], "lead")
+        self.assertEqual(body["legal_card_ids"], [])
         self.assertEqual(body["public"]["acting_seat"], "E")
         self.assertIsNotNone(body["public"]["action_deadline_epoch_ms"])
 

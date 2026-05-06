@@ -34,6 +34,7 @@ from server.domain.controllers import ControllerCapability, ControllerKind, Cont
 from server.domain.seats import Seat
 from server.services.table_config import TableConfig, TimeoutFallback
 from server.services.table_actor import ActorResult, TableActor
+from server.services.public_events import public_events
 
 
 def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
@@ -269,7 +270,7 @@ def _response_from_result(
     extra: dict[str, Any] | None = None,
 ) -> CommandResponse:
     response = CommandResponse(
-        events=[EventSchema.from_event(event) for event in result.events],
+        events=[EventSchema.from_event(event) for event in public_events(result.events)],
         event_seq=actor.state.event_seq,
         snapshot=PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot()),
         replayed=result.replayed,

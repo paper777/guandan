@@ -64,6 +64,9 @@ def format_seat_snapshot(snapshot: JsonObject, *, npc_metadata: dict[str, str] |
     public_snapshot = public if isinstance(public, dict) else {}
     lines = _public_snapshot_lines(public_snapshot, viewer_seat=snapshot.get("seat"), npc_metadata=npc_metadata)
     lines.append(f"Action: {snapshot.get('legal_action') or '-'}")
+    legal_cards = snapshot.get("legal_card_ids")
+    if isinstance(legal_cards, (list, tuple)) and legal_cards:
+        lines.append("Legal cards: " + format_hand(legal_cards))
     lines.append("Hand: " + format_hand(snapshot.get("hand", ())))
     return _render_panel(lines, title="Your Seat")
 
@@ -287,7 +290,7 @@ def help_text() -> str:
         (
             "Commands:",
             "  play <card-label-or-id> [<card-label-or-id>...]",
-            "    examples: play S3, play H10 C10, play SJ",
+            "    examples: play S3, play H10 C10, play small",
             "  pass",
             "  tribute <card-label-or-id>",
             "  return <card-label-or-id>",
@@ -347,7 +350,7 @@ def format_card_id(card_id: str) -> str:
     parts = card_id.split("-")
     deck_label = ""
     if len(parts) == 2 and parts[0].startswith("D"):
-        joker = f"🃏{parts[1]}" if parts[1] in {"SJ", "BJ"} else parts[1]
+        joker = {"SJ": "🃏 Small Joker", "BJ": "🃏 Big Joker"}.get(parts[1], parts[1])
         return f"{deck_label}{joker}"
     if len(parts) == 3 and parts[0].startswith("D"):
         suit = SUIT_EMOJI.get(parts[1], parts[1])

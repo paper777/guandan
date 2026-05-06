@@ -20,6 +20,7 @@ from server.api.schemas import (
     WebSocketServerMessage,
 )
 from server.domain.commands import Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
+from server.services.public_events import public_events
 from server.services.table_actor import TableActor
 
 
@@ -118,7 +119,7 @@ async def _handle_message(actor: TableActor, message: WebSocketClientMessage) ->
             "event_seq": actor.state.event_seq,
         }
     response = CommandResponse(
-        events=[EventSchema.from_event(event) for event in result.events],
+        events=[EventSchema.from_event(event) for event in public_events(result.events)],
         event_seq=actor.state.event_seq,
         snapshot=PublicTableSnapshotSchema.from_snapshot(actor.public_snapshot()),
         replayed=result.replayed,

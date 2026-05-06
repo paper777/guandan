@@ -73,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument("--seat", choices=[seat.value for seat in SEATS], default="E", help="Human seat.")
     play.add_argument("--player-id", help="Human player ID. Defaults to human-<seat>.")
     play.add_argument("--controller-id", help="Human controller ID. Defaults to human-controller-<seat>.")
-    play.add_argument("--display-name", help="Human display name. Defaults to the player ID.")
+    play.add_argument("--display-name", help="Human display name. Defaults to the OS login name.")
     play.add_argument(
         "--max-bot-actions",
         type=int,

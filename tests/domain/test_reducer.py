@@ -238,6 +238,7 @@ class ReducerTests(unittest.TestCase):
         self.assertEqual(state.phase, MatchPhase.TRIBUTE)
         assert state.deal is not None and state.deal.tribute is not None
         obligation = state.deal.tribute.obligations[0]
+        self.assertEqual(state.deal.turn, obligation.giver)
         # Use the reducer's validation by finding an accepted highest card.
         for candidate in state.deal.hand_for(obligation.giver):
             paid = reduce_command(state, SubmitTribute(controller(obligation.giver).id, obligation.giver, candidate))
@@ -248,6 +249,7 @@ class ReducerTests(unittest.TestCase):
             self.fail("no tribute card accepted")
 
         assert state.deal is not None and state.deal.tribute is not None
+        self.assertEqual(state.deal.turn, obligation.receiver)
         receiver = obligation.receiver
         return_card = next(card_id for card_id in state.deal.hand_for(receiver) if not card_id.endswith("-BJ"))
         result = reduce_command(state, ReturnTribute(controller(receiver).id, receiver, return_card))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import json
 import tempfile
 import unittest
@@ -157,13 +158,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Table table-1 | You are E", result.output)
         self.assertIn("PLAYING | Seat E | Turn E", result.output)
-        self.assertIn("E human-E 3 (You)", result.output)
+        login_name = getpass.getuser()
+        self.assertIn(f"E {login_name} 3 (You)", result.output)
         self.assertIn("S Jade 1", result.output)
         self.assertIn("W River 1 (F)", result.output)
         self.assertIn("N Atlas 1", result.output)
         self.assertIn("codex-cli/gpt-5.5", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
-        self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "human-E"), client.calls)
+        self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", login_name), client.calls)
         self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
         self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
         self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
@@ -448,12 +450,12 @@ class CliTests(unittest.TestCase):
     def test_card_formatter_hides_first_deck_and_uses_suit_emoji(self) -> None:
         self.assertEqual(format_card_id("D1-S-3"), "♠️ 3")
         self.assertEqual(format_card_id("D2-H-10"), "♥️ 10")
-        self.assertEqual(format_card_id("D1-SJ"), "🃏SJ")
+        self.assertEqual(format_card_id("D1-SJ"), "🃏 Small Joker")
 
     def test_hand_formatter_sorts_by_number_then_suit(self) -> None:
         self.assertEqual(
             format_hand(["D1-C-3", "D1-H-2", "D1-S-3", "D2-D-2", "D1-BJ", "D1-SJ"]),
-            "♥️ 2  ♦️ 2  ♠️ 3  ♣️ 3  🃏SJ  🃏BJ",
+            "♥️ 2  ♦️ 2  ♠️ 3  ♣️ 3  🃏 Small Joker  🃏 Big Joker",
         )
 
     def test_numeric_card_input_uses_sorted_hand_order(self) -> None:
@@ -466,6 +468,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             resolve_card_inputs(["S3", "♥2", "SJ"], {"hand": ["D1-SJ", "D1-H-2", "D2-S-3"]}),
             ("D2-S-3", "D1-H-2", "D1-SJ"),
+        )
+
+    def test_delimited_spade_jack_does_not_resolve_as_small_joker(self) -> None:
+        self.assertEqual(
+            resolve_card_inputs(["S-J", "SJ"], {"hand": ["D1-S-J", "D1-SJ"]}),
+            ("D1-S-J", "D1-SJ"),
         )
 
     def test_repeated_readable_card_input_uses_distinct_physical_cards(self) -> None:
@@ -538,6 +546,7 @@ class CliTests(unittest.TestCase):
                 },
                 "seat": "E",
                 "legal_action": "lead",
+                "legal_card_ids": ["D1-S-3"],
                 "hand": ["D1-H-4", "D1-C-3", "D2-S-3"],
             }
         )
@@ -547,6 +556,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("S South 4", output)
         self.assertIn("W - 0 (F)", output)
         self.assertIn("N - 0", output)
+        self.assertIn("Legal cards: ♠️ 3", output)
         self.assertNotIn("Your seat:", output)
 
     def test_friend_mark_identifies_partner_for_viewer_seat(self) -> None:

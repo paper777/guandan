@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 from dataclasses import dataclass
 
 from client.api import GuandanHttpClient, JsonObject
@@ -24,6 +25,7 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
     human_seat = str(args.seat)
     human_player_id = args.player_id or f"human-{human_seat}"
     human_controller_id = args.controller_id or f"human-controller-{human_seat}"
+    human_display_name = args.display_name or getpass.getuser()
     seats = public_snapshot.get("seats", {})
     if human_seat not in seats:
         response = client.join_human(
@@ -31,7 +33,7 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
             human_seat,
             player_id=human_player_id,
             controller_id=human_controller_id,
-            display_name=args.display_name or human_player_id,
+            display_name=human_display_name,
         )
         human_controller_id = str(response.get("controller_id", human_controller_id))
         public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)

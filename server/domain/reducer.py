@@ -153,12 +153,13 @@ def _start_next_deal(state: MatchState, command: StartMatch) -> ReducerResult:
     hands_by_seat = {seat: hands[index] for index, seat in enumerate(SEATS)}
     tribute = _build_tribute_state(state.last_deal_result, hands_by_seat, state.current_level)
     leader = tribute.leader_after
+    turn = leader if tribute.resisted else _tribute_turn(tribute)
     deal = DealState(
         hands=hands_by_seat,
         active_seats=frozenset(SEATS),
         finish_order=(),
         leader=leader,
-        turn=leader,
+        turn=turn,
         current_trick=TrickState(lead_seat=leader),
         tribute=None if tribute.resisted else tribute,
     )
@@ -198,6 +199,8 @@ def _submit_tribute(state: MatchState, command: SubmitTribute) -> ReducerResult:
     rejection = _require_controller(state, command.controller_id, command.seat, ControllerCapability.PLAY)
     if rejection:
         return _reject(state, rejection.code, rejection.message)
+    if state.deal.turn != command.seat:
+        return _reject(state, RejectCode.NOT_YOUR_TURN, "it is not that seat's tribute turn")
     tribute = state.deal.tribute
     index = _find_obligation_index(tribute, giver=command.seat, needs_tribute=True)
     if index is None:
@@ -212,7 +215,7 @@ def _submit_tribute(state: MatchState, command: SubmitTribute) -> ReducerResult:
     obligations = list(tribute.obligations)
     obligations[index] = replace(obligation, tribute_card_id=command.card_id)
     next_tribute = replace(tribute, obligations=tuple(obligations))
-    deal = replace(state.deal, hands=hands, tribute=next_tribute)
+    deal = replace(state.deal, hands=hands, tribute=next_tribute, turn=_tribute_turn(next_tribute))
     next_state = replace(state.bump_seq(), deal=deal)
     return ReducerResult(
         state=next_state,
@@ -232,6 +235,8 @@ def _return_tribute(state: MatchState, command: ReturnTribute) -> ReducerResult:
     rejection = _require_controller(state, command.controller_id, command.seat, ControllerCapability.PLAY)
     if rejection:
         return _reject(state, rejection.code, rejection.message)
+    if state.deal.turn != command.seat:
+        return _reject(state, RejectCode.NOT_YOUR_TURN, "it is not that seat's tribute return turn")
     tribute = state.deal.tribute
     index = _find_obligation_index(tribute, receiver=command.seat, needs_return=True)
     if index is None:
@@ -252,7 +257,7 @@ def _return_tribute(state: MatchState, command: ReturnTribute) -> ReducerResult:
         hands=hands,
         tribute=None if complete else next_tribute,
         leader=tribute.leader_after if complete else state.deal.leader,
-        turn=tribute.leader_after if complete else state.deal.turn,
+        turn=tribute.leader_after if complete else _tribute_turn(next_tribute),
         current_trick=TrickState(lead_seat=tribute.leader_after) if complete else state.deal.current_trick,
     )
     event_specs: list[tuple[str, dict[str, object]]] = [
@@ -494,6 +499,16 @@ def _find_obligation_index(
             continue
         return index
     return None
+
+
+def _tribute_turn(tribute: TributeState) -> Seat:
+    for obligation in tribute.obligations:
+        if obligation.tribute_card_id is None:
+            return obligation.giver
+    for obligation in tribute.obligations:
+        if obligation.return_card_id is None:
+            return obligation.receiver
+    return tribute.leader_after
 
 
 def _move_card(hands: dict[Seat, tuple[str, ...]], source: Seat, target: Seat, card_id: str) -> dict[Seat, tuple[str, ...]]:

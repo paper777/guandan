@@ -36,6 +36,17 @@ class DummyBotPolicyTests(unittest.TestCase):
 
         self.assertEqual(action, {"type": "submit_tribute", "card_id": "D1-S-A"})
 
+    def test_uses_server_provided_legal_return_choices(self) -> None:
+        action = DummyBotPolicy().choose_action(
+            ActionRequest(
+                "r-1",
+                {"kind": "return_tribute", "current_level": "2", "legal_card_ids": ["D1-S-10"]},
+                {"hand": ["D1-S-10", "D1-S-A"]},
+            )
+        )
+
+        self.assertEqual(action, {"type": "return_tribute", "card_id": "D1-S-10"})
+
 
 if __name__ == "__main__":
     unittest.main()

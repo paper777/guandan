@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from server.domain.cards import Rank
+from server.domain.cards import CARD_BY_ID, Rank, is_red_heart_level_card
+from server.domain.comparator import RankContext
 from server.domain.controllers import ControllerCapability
 from server.domain.hand_types import PlayedHand
 from server.domain.seats import Seat
-from server.domain.state import MatchPhase, MatchState
+from server.domain.state import MatchPhase, MatchState, TributeObligation
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,10 @@ class SeatSnapshot:
     seat: Seat
     hand: tuple[str, ...]
     legal_action: str | None
+    legal_card_ids: tuple[str, ...] = ()
+    tribute_from: Seat | None = None
+    tribute_to: Seat | None = None
+    return_rank_at_most_ten: bool = False
 
 
 def public_snapshot(
@@ -99,6 +104,10 @@ def seat_snapshot(
         raise PermissionError("controller cannot observe private seat state")
     hand = state.deal.hand_for(seat) if state.deal is not None else ()
     legal_action = None
+    legal_card_ids: tuple[str, ...] = ()
+    tribute_from: Seat | None = None
+    tribute_to: Seat | None = None
+    return_rank_at_most_ten = False
     if state.deal is not None and controller.can(ControllerCapability.PLAY):
         if state.phase == MatchPhase.PLAYING and state.deal.turn == seat:
             legal_action = "lead" if state.deal.current_trick.last_play is None else "play_or_pass"
@@ -106,6 +115,8 @@ def seat_snapshot(
             for obligation in state.deal.tribute.obligations:
                 if obligation.giver == seat and obligation.tribute_card_id is None:
                     legal_action = "tribute"
+                    legal_card_ids = _highest_eligible_tribute_cards(hand, state.current_level)
+                    tribute_to = obligation.receiver
                     break
             if legal_action is None:
                 for obligation in state.deal.tribute.obligations:
@@ -115,6 +126,9 @@ def seat_snapshot(
                         and obligation.return_card_id is None
                     ):
                         legal_action = "return_tribute"
+                        legal_card_ids = _eligible_return_cards(hand, obligation)
+                        tribute_from = obligation.giver
+                        return_rank_at_most_ten = _return_rank_at_most_ten(obligation)
                         break
     return SeatSnapshot(
         public=public_snapshot(
@@ -126,6 +140,10 @@ def seat_snapshot(
         seat=seat,
         hand=hand,
         legal_action=legal_action,
+        legal_card_ids=legal_card_ids,
+        tribute_from=tribute_from,
+        tribute_to=tribute_to,
+        return_rank_at_most_ten=return_rank_at_most_ten,
     )
 
 
@@ -139,3 +157,36 @@ def _public_trick(last_play: PlayedHand | None, last_play_seat: Seat | None) -> 
         "primary_rank": last_play.primary_rank.value,
         "length": last_play.length,
     }
+
+
+def _highest_eligible_tribute_cards(card_ids: tuple[str, ...], level: Rank) -> tuple[str, ...]:
+    ctx = RankContext(level)
+    eligible = [CARD_BY_ID[card_id] for card_id in card_ids if not is_red_heart_level_card(CARD_BY_ID[card_id], level)]
+    if not eligible:
+        return ()
+    max_value = max(ctx.rank_value(card.rank) for card in eligible)
+    return tuple(card.id for card in eligible if ctx.rank_value(card.rank) == max_value)
+
+
+def _eligible_return_cards(card_ids: tuple[str, ...], obligation: TributeObligation) -> tuple[str, ...]:
+    if not _return_rank_at_most_ten(obligation):
+        return card_ids
+    return tuple(card_id for card_id in card_ids if _rank_at_most_ten(card_id))
+
+
+def _return_rank_at_most_ten(obligation: TributeObligation) -> bool:
+    return _partner_for_seat(obligation.receiver) == obligation.giver
+
+
+def _partner_for_seat(seat: Seat) -> Seat:
+    return {
+        Seat.EAST: Seat.WEST,
+        Seat.WEST: Seat.EAST,
+        Seat.SOUTH: Seat.NORTH,
+        Seat.NORTH: Seat.SOUTH,
+    }[seat]
+
+
+def _rank_at_most_ten(card_id: str) -> bool:
+    rank = CARD_BY_ID[card_id].rank
+    return rank.value in {"2", "3", "4", "5", "6", "7", "8", "9", "10"}

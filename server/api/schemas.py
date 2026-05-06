@@ -60,6 +60,10 @@ class SeatSnapshotSchema(BaseModel):
     seat: Seat
     hand: tuple[str, ...]
     legal_action: str | None
+    legal_card_ids: tuple[str, ...] = ()
+    tribute_from: Seat | None = None
+    tribute_to: Seat | None = None
+    return_rank_at_most_ten: bool = False
 
     @classmethod
     def from_snapshot(cls, snapshot: SeatSnapshot) -> SeatSnapshotSchema:
@@ -68,6 +72,10 @@ class SeatSnapshotSchema(BaseModel):
             seat=snapshot.seat,
             hand=snapshot.hand,
             legal_action=snapshot.legal_action,
+            legal_card_ids=snapshot.legal_card_ids,
+            tribute_from=snapshot.tribute_from,
+            tribute_to=snapshot.tribute_to,
+            return_rank_at_most_ten=snapshot.return_rank_at_most_ten,
         )
 
 
