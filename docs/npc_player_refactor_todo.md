@@ -17,7 +17,7 @@ Refactor NPC players around a shared abstract `Player`, split the LLM agent into
 - [x] Keep deterministic LLM behavior available for offline tests and local dry runs.
 - [x] Add broker helpers for default NPC lineups.
 - [x] Define the mixed default lineup as `Ming` dummy bot plus `Jade`, `River`, and `Atlas` LLM agents.
-- [x] Make the default lineup configurable through `data/default_players.json`.
+- [x] Make the player lineup configurable through `data/players.json`.
 - [x] Support signed-in Codex CLI as `provider_name: "codex-cli"` without an API key.
 - [x] Integrate a card-player advisor into `LlmAgentPlayer` prompts and fallback policy.
 - [x] Add CLI `--npc-lineup` with `mixed`, `dummy`, and `llm` choices.

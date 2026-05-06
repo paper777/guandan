@@ -46,7 +46,8 @@ def run_cli(
             return CliResult(0, "".join(output))
         input_reader = input_fn or input
         session, public_snapshot = prepare_default_table(active_client, args)
-        emit(f"Table {session.table_id} | You are {session.human_seat}")
+        seat_label = "Watching" if session.player_mode == "llm" else "You are"
+        emit(f"Table {session.table_id} | {seat_label} {session.human_seat}")
         emit(format_public_snapshot(public_snapshot, viewer_seat=session.human_seat, npc_metadata=session.npc_metadata).rstrip())
         machine = CliStateMachine(
             args=args,
@@ -75,6 +76,12 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument("--controller-id", help="Human controller ID. Defaults to human-controller-<seat>.")
     play.add_argument("--display-name", help="Human display name. Defaults to the OS login name.")
     play.add_argument(
+        "--player-mode",
+        choices=("human", "llm"),
+        default="human",
+        help="Who controls the selected seat. Use llm to watch an LLM agent play that seat.",
+    )
+    play.add_argument(
         "--max-bot-actions",
         type=int,
         default=128,
@@ -88,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     play.add_argument(
         "--npc-player-config",
-        help="JSON file for default NPC player names and kinds.",
+        help="JSON player database for NPC profiles and stats.",
     )
 
     snapshot = subparsers.add_parser("snapshot", help="Print a public table snapshot.")

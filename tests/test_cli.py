@@ -89,6 +89,7 @@ class FakeClient:
         self.calls.append(("play_cards", table_id, seat, controller_id, card_ids, declared_type))
         for card_id in card_ids:
             self.hands[seat].remove(card_id)
+        self.current_trick = {"last_play_seat": seat, "hand_type": "single", "card_ids": list(card_ids)}
         self.current_turn = {"E": "S", "S": "W", "W": "N", "N": "E"}[seat]
         self.event_seq += 1
         return {
@@ -172,6 +173,90 @@ class CliTests(unittest.TestCase):
         self.assertNotIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
         self.assertIn(("start", "table-1"), client.calls)
 
+    def test_llm_player_mode_joins_selected_seat_as_agent_and_watches_private_hand(self) -> None:
+        class LlmWatchClient(FakeClient):
+            def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
+                response = super().play_cards(table_id, seat, controller_id, card_ids, declared_type=declared_type)
+                self.phase = "MATCH_COMPLETE"
+                self.current_turn = None
+                response["snapshot"] = self._snapshot()
+                return response
+
+        client = LlmWatchClient()
+
+        def unexpected_input(prompt):
+            raise AssertionError("LLM watch mode should not prompt for input")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "players.json"
+            path.write_text(
+                json.dumps({"players": [{"seat": "E", "display_name": "Pilot", "kind": "llm"}]}),
+                encoding="utf-8",
+            )
+            result = run_cli(
+                [
+                    "--player-mode",
+                    "llm",
+                    "--npc-lineup",
+                    "dummy",
+                    "--display-name",
+                    "Pilot",
+                    "--npc-player-config",
+                    str(path),
+                ],
+                input_fn=unexpected_input,
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Table table-1 | Watching E", result.output)
+        self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
+        self.assertIn(("join_agent", "table-1", "E", "Pilot"), client.calls)
+        self.assertNotIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "Pilot"), client.calls)
+        self.assertIn(("seat_snapshot", "table-1", "E", "agent-controller-E"), client.calls)
+        self.assertIn(("play_cards", "table-1", "E", "agent-controller-E", ("D1-C-3",), None), client.calls)
+
+    def test_llm_player_mode_uses_selected_seat_config_metadata(self) -> None:
+        class MatchCompleteClient(FakeClient):
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
+                self.phase = "MATCH_COMPLETE"
+                self.current_turn = None
+                return {
+                    "events": [{"seq": 1, "type": "MatchEnded", "payload": {"winning_team": "EW"}}],
+                    "snapshot": self._snapshot(),
+                }
+
+        client = MatchCompleteClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "players.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "players": [
+                            {
+                                "seat": "E",
+                                "display_name": "Configured East",
+                                "kind": "llm",
+                                "provider_name": "deterministic",
+                                "model_name": "configured-model",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                ["--player-mode", "llm", "--npc-player-config", str(path), "--display-name", "Pilot"],
+                input_fn=lambda prompt: "unused",
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("join_agent", "table-1", "E", "Pilot"), client.calls)
+        self.assertIn("deterministic/configured-model", result.output)
+
     def test_human_play_readable_card_label_then_drives_bot_passes(self) -> None:
         client = FakeClient()
         commands = iter(["play C3", "quit"])
@@ -184,9 +269,63 @@ class CliTests(unittest.TestCase):
         self.assertIn(("pass_turn", "table-1", "W", "agent-controller-W"), client.calls)
         self.assertIn(("pass_turn", "table-1", "N", "agent-controller-N"), client.calls)
         self.assertIn("1: E played single [♣️ 3]", result.output)
-        self.assertIn("2: S passed", result.output)
-        self.assertIn("3: W passed", result.output)
-        self.assertIn("4: N passed", result.output)
+        self.assertIn("2: S passed; last play E single [♣️ 3]", result.output)
+        self.assertIn("3: W passed; last play E single [♣️ 3]", result.output)
+        self.assertIn("4: N passed; last play E single [♣️ 3]", result.output)
+
+    def test_server_rejection_shows_resolved_command_cards(self) -> None:
+        class RejectPlayClient(FakeClient):
+            def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
+                self.calls.append(("play_cards", table_id, seat, controller_id, card_ids, declared_type))
+                raise GuandanClientError(
+                    400,
+                    "INVALID_HAND_TYPE: invalid hand",
+                    {"rejection": {"code": "INVALID_HAND_TYPE", "message": "invalid hand"}},
+                )
+
+        client = RejectPlayClient()
+        commands = iter(["play C3 S3", "quit"])
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: next(commands), client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Error: HTTP 400: INVALID_HAND_TYPE: invalid hand", result.output)
+        self.assertIn("Rejected cards: [♣️ 3, ♠️ 3]", result.output)
+
+    def test_llm_rejection_shows_submitted_action_cards(self) -> None:
+        class RejectLlmPlayClient(FakeClient):
+            def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
+                self.calls.append(("play_cards", table_id, seat, controller_id, card_ids, declared_type))
+                raise GuandanClientError(
+                    400,
+                    "INVALID_HAND_TYPE: invalid hand",
+                    {"rejection": {"code": "INVALID_HAND_TYPE", "message": "invalid hand"}},
+                )
+
+        client = RejectLlmPlayClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "players.json"
+            path.write_text(
+                json.dumps({"players": [{"seat": "E", "display_name": "Pilot", "kind": "llm"}]}),
+                encoding="utf-8",
+            )
+
+            result = run_cli(
+                [
+                    "--player-mode",
+                    "llm",
+                    "--display-name",
+                    "Pilot",
+                    "--npc-player-config",
+                    str(path),
+                ],
+                input_fn=lambda prompt: "unused",
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Error: HTTP 400: INVALID_HAND_TYPE: invalid hand", result.output)
+        self.assertIn("Rejected cards: [♣️ 3]", result.output)
 
     def test_human_timeout_refreshes_before_processing_input_and_prints_bot_actions(self) -> None:
         client = FakeClient()
@@ -583,6 +722,22 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(output, "1: E played single [♠️ 3]\n")
         self.assertNotIn("ActionPrompted", output)
+
+    def test_pass_response_repeats_current_played_cards(self) -> None:
+        output = format_command_response(
+            {
+                "events": [{"seq": 2, "type": "PlayerPassed", "payload": {"seat": "S"}}],
+                "snapshot": {
+                    "current_trick": {
+                        "last_play_seat": "E",
+                        "hand_type": "single",
+                        "card_ids": ["D1-C-3"],
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(output, "2: S passed; last play E single [♣️ 3]\n")
 
 
 if __name__ == "__main__":

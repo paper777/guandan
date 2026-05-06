@@ -60,6 +60,20 @@ def submit_human_command(
     raise GuandanClientError(None, f"unsupported command: {command}")
 
 
+def command_card_ids(command: str, seat_snapshot: JsonObject | None = None) -> tuple[str, ...]:
+    parts = command.split()
+    if not parts:
+        return ()
+    action = parts[0]
+    if action == "play" and len(parts) > 1:
+        return resolve_card_inputs(parts[1:], seat_snapshot)
+    if action == "tribute" and len(parts) == 2:
+        return resolve_card_inputs(parts[1:], seat_snapshot)
+    if action in {"return", "return_tribute"} and len(parts) == 2:
+        return resolve_card_inputs(parts[1:], seat_snapshot)
+    return ()
+
+
 def resolve_card_inputs(tokens: list[str], snapshot: JsonObject | None) -> tuple[str, ...]:
     hand = sort_card_ids(snapshot.get("hand", ())) if snapshot is not None else ()
     resolved: list[str] = []

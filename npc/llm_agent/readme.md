@@ -38,7 +38,7 @@ After each deal ends, the same memory sub-agent also updates `player_profiles` b
 
 LLM players also receive a `personality` profile in the prompt. Supported defaults are `aggressive`, `balanced`, and `defensive`; the profile influences risk tolerance, tempo bias, bomb usage, passing bias, and structure preservation while keeping all actions legal.
 
-Default broker players are configured in `data/default_players.json`. To use the signed-in Codex CLI instead of an API key, set an LLM player's provider to `codex-cli`:
+Broker players are configured in `data/players.json`. To use the signed-in Codex CLI instead of an API key, set an LLM player's provider to `codex-cli`:
 
 ```json
 {

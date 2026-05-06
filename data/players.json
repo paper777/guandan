@@ -1,0 +1,60 @@
+{
+    "players": [
+        {
+            "seat": "E",
+            "display_name": "also",
+            "kind": "llm",
+            "personality": "balanced",
+            "provider_name": "codex-cli",
+            "model_name": "gpt-5.5",
+            "deal_count": 0,
+            "deal_wins": 0,
+            "deal_win_rate": 0.0,
+            "match_count": 0,
+            "match_wins": 0,
+            "match_win_rate": 0.0
+        },
+        {
+            "seat": "S",
+            "display_name": "Jade",
+            "kind": "llm",
+            "personality": "aggressive",
+            "provider_name": "codex-cli",
+            "model_name": "gpt-5.5",
+            "deal_count": 0,
+            "deal_wins": 0,
+            "deal_win_rate": 0.0,
+            "match_count": 0,
+            "match_wins": 0,
+            "match_win_rate": 0.0
+        },
+        {
+            "seat": "W",
+            "display_name": "River",
+            "kind": "llm",
+            "personality": "balanced",
+            "provider_name": "codex-cli",
+            "model_name": "gpt-5.5",
+            "deal_count": 0,
+            "deal_wins": 0,
+            "deal_win_rate": 0.0,
+            "match_count": 0,
+            "match_wins": 0,
+            "match_win_rate": 0.0
+        },
+        {
+            "seat": "N",
+            "display_name": "Atlas",
+            "kind": "llm",
+            "personality": "defensive",
+            "provider_name": "codex-cli",
+            "model_name": "gpt-5.5",
+            "deal_count": 0,
+            "deal_wins": 0,
+            "deal_win_rate": 0.0,
+            "match_count": 0,
+            "match_wins": 0,
+            "match_win_rate": 0.0
+        }
+    ]
+}

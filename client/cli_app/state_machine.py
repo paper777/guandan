@@ -5,9 +5,10 @@ import time
 from enum import StrEnum
 
 from client.api import GuandanClientError, GuandanHttpClient, JsonObject
-from client.cli_app.commands import read_command, submit_human_command
+from client.cli_app.commands import command_card_ids, read_command, submit_human_command
 from client.cli_app.render import (
     client_error_code,
+    format_card_list,
     format_client_error,
     format_command_response,
     format_public_snapshot,
@@ -49,19 +50,52 @@ class CliStateMachine:
         self.deal_number = 1
 
     def run(self, public_snapshot: JsonObject) -> JsonObject:
-        current = drive_bot_turns(self.client, self.session, public_snapshot, self.emit, self.args.max_bot_actions)
+        current = drive_bot_turns(
+            self.client,
+            self.session,
+            public_snapshot,
+            self.emit,
+            self.args.max_bot_actions,
+            watch_private_seat=self._watch_private_seat(),
+        )
         while True:
             state = self._machine_state(current)
             if state == CliMachineState.FINISHED:
-                self.emit(format_public_snapshot(current, viewer_seat=self.session.human_seat, npc_metadata=self.session.npc_metadata).rstrip())
+                self.emit(
+                    format_public_snapshot(
+                        current,
+                        viewer_seat=self.session.human_seat,
+                        npc_metadata=self.session.npc_metadata,
+                    ).rstrip()
+                )
                 return current
             if state == CliMachineState.DEAL_COMPLETE:
                 current = self._start_next_deal()
-                self.emit(format_public_snapshot(current, viewer_seat=self.session.human_seat, npc_metadata=self.session.npc_metadata).rstrip())
-                current = drive_bot_turns(self.client, self.session, current, self.emit, self.args.max_bot_actions)
+                self.emit(
+                    format_public_snapshot(
+                        current,
+                        viewer_seat=self.session.human_seat,
+                        npc_metadata=self.session.npc_metadata,
+                    ).rstrip()
+                )
+                current = drive_bot_turns(
+                    self.client,
+                    self.session,
+                    current,
+                    self.emit,
+                    self.args.max_bot_actions,
+                    watch_private_seat=self._watch_private_seat(),
+                )
                 continue
             if state == CliMachineState.BOT_TURN:
-                updated = drive_bot_turns(self.client, self.session, current, self.emit, self.args.max_bot_actions)
+                updated = drive_bot_turns(
+                    self.client,
+                    self.session,
+                    current,
+                    self.emit,
+                    self.args.max_bot_actions,
+                    watch_private_seat=self._watch_private_seat(),
+                )
                 if updated == current:
                     current = wait_for_timeout_resolution(self.client, current, self.emit)
                     if updated == current:
@@ -91,11 +125,20 @@ class CliStateMachine:
             return CliMachineState.DEAL_COMPLETE
         if phase in ACTIVE_PHASES:
             acting_seat = snapshot_acting_seat(snapshot)
+            if (
+                self.session.player_mode == "llm"
+                and isinstance(acting_seat, str)
+                and acting_seat in self.session.bot_broker.seats
+            ):
+                return CliMachineState.BOT_TURN
             if acting_seat == self.session.human_seat:
                 return CliMachineState.HUMAN_TURN
             if isinstance(acting_seat, str) and acting_seat in self.session.bot_broker.seats:
                 return CliMachineState.BOT_TURN
         return CliMachineState.WAITING
+
+    def _watch_private_seat(self) -> str | None:
+        return self.session.human_seat if self.session.player_mode == "llm" else None
 
     def _start_next_deal(self) -> JsonObject:
         self.deal_number += 1
@@ -153,6 +196,9 @@ class CliStateMachine:
             response = submit_human_command(self.client, self.session, command, seat_snapshot)
         except GuandanClientError as exc:
             self.emit(format_client_error(exc))
+            rejected_cards = rejected_command_cards(command, seat_snapshot, exc)
+            if rejected_cards:
+                self.emit(f"Rejected cards: {format_card_list(rejected_cards)}")
             return self.client.table_snapshot(self.session.table_id)
         self.emit(format_command_response(response).rstrip())
         public_snapshot = response.get("snapshot") or self.client.table_snapshot(self.session.table_id)
@@ -165,6 +211,8 @@ def drive_bot_turns(
     public_snapshot: JsonObject,
     emit: OutputFn,
     max_actions: int,
+    *,
+    watch_private_seat: str | None = None,
 ) -> JsonObject:
     current = public_snapshot
     actions = 0
@@ -176,11 +224,17 @@ def drive_bot_turns(
             emit("Stopped automatic bot play after reaching the safety limit.")
             return current
         try:
+            if seat == watch_private_seat:
+                seat_snapshot = client.seat_snapshot(session.table_id, seat, session.human_controller_id)
+                emit(format_seat_snapshot(seat_snapshot, npc_metadata=session.npc_metadata).rstrip())
             submitted = session.bot_broker.poll_once_results(seat)
         except GuandanClientError as exc:
             if client_error_code(exc) == "NOT_YOUR_TURN":
                 return client.table_snapshot(session.table_id)
             emit(format_client_error(exc))
+            rejected_cards = rejected_broker_action_cards(exc)
+            if rejected_cards:
+                emit(f"Rejected cards: {format_card_list(rejected_cards)}")
             return client.table_snapshot(session.table_id)
         if not submitted:
             return client.table_snapshot(session.table_id)
@@ -189,6 +243,24 @@ def drive_bot_turns(
         current = client.table_snapshot(session.table_id)
         actions += len(submitted)
     return current
+
+
+def rejected_command_cards(command: str, seat_snapshot: JsonObject, error: GuandanClientError) -> tuple[str, ...]:
+    if error.status != 400:
+        return ()
+    try:
+        return command_card_ids(command, seat_snapshot)
+    except GuandanClientError:
+        return ()
+
+
+def rejected_broker_action_cards(error: GuandanClientError) -> tuple[str, ...]:
+    if error.status != 400:
+        return ()
+    card_ids = error.payload.get("rejected_card_ids")
+    if not isinstance(card_ids, list):
+        return ()
+    return tuple(str(card_id) for card_id in card_ids)
 
 
 def _human_turn_elapsed(snapshot: JsonObject, session: CliSession) -> bool:

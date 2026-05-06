@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from npc.broker.broker import NpcBroker, load_default_player_profiles
+from npc.broker.broker import NpcBroker, load_player_profiles
 from npc.common.player import Player
 from npc.dummy_bot.policy import DummyBotPolicy
 from npc.llm_agent import LlmAgentPlayer
@@ -50,10 +50,11 @@ class FakeClient:
 
 
 class NpcBrokerTests(unittest.TestCase):
-    def test_default_mixed_lineup_uses_named_profiles(self) -> None:
-        broker = NpcBroker(FakeClient(), "table-1")
+    def test_mixed_lineup_uses_named_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            broker = NpcBroker(FakeClient(), "table-1", player_db_path=Path(tmp) / "players.json")
 
-        seats = broker.add_default_players(("E", "S", "W", "N"), lineup="mixed")
+            seats = broker.add_players(("E", "S", "W", "N"), lineup="mixed")
 
         self.assertEqual([seat.display_name for seat in seats], ["Ming", "Jade", "River", "Atlas"])
         self.assertIsInstance(broker.seats["E"].policy, DummyBotPolicy)
@@ -65,19 +66,21 @@ class NpcBrokerTests(unittest.TestCase):
         self.assertEqual(broker.seats["W"].policy.config.personality, "balanced")
         self.assertEqual(broker.seats["N"].policy.config.personality, "defensive")
 
-    def test_default_lineups_can_force_all_dummy_or_all_llm(self) -> None:
-        dummy_broker = NpcBroker(FakeClient(), "table-1")
-        llm_broker = NpcBroker(FakeClient(), "table-1")
+    def test_lineups_can_force_all_dummy_or_all_llm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            player_db_path = Path(tmp) / "players.json"
+            dummy_broker = NpcBroker(FakeClient(), "table-1", player_db_path=player_db_path)
+            llm_broker = NpcBroker(FakeClient(), "table-1", player_db_path=player_db_path)
 
-        dummy_broker.add_default_players(("S", "W"), lineup="dummy")
-        llm_broker.add_default_players(("S", "W"), lineup="llm")
+            dummy_broker.add_players(("S", "W"), lineup="dummy")
+            llm_broker.add_players(("S", "W"), lineup="llm")
 
         self.assertTrue(all(isinstance(seat.policy, DummyBotPolicy) for seat in dummy_broker.seats.values()))
         self.assertTrue(all(isinstance(seat.policy, LlmAgentPlayer) for seat in llm_broker.seats.values()))
 
-    def test_default_profiles_can_be_loaded_from_data_file(self) -> None:
+    def test_player_profiles_can_be_loaded_from_database(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "default_players.json"
+            path = Path(tmp) / "players.json"
             path.write_text(
                 json.dumps(
                     {
@@ -100,25 +103,66 @@ class NpcBrokerTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            profiles = load_default_player_profiles(path)
-            broker = NpcBroker(FakeClient(), "table-1")
-            seats = broker.add_default_players(("S", "W"), lineup="mixed", config_path=path)
+            profiles = load_player_profiles(path)
+            broker = NpcBroker(FakeClient(), "table-1", player_db_path=path)
+            seats = broker.add_players(("S", "W"), lineup="mixed")
 
-        self.assertEqual(profiles[1].display_name, "South Custom")
-        self.assertEqual(profiles[2].display_name, "West Custom")
-        self.assertEqual(profiles[2].personality, "defensive")
+        self.assertEqual(profiles[0].display_name, "South Custom")
+        self.assertEqual(profiles[1].display_name, "West Custom")
+        self.assertEqual(profiles[1].personality, "defensive")
         self.assertEqual([seat.display_name for seat in seats], ["South Custom", "West Custom"])
         self.assertIsInstance(broker.seats["S"].policy, DummyBotPolicy)
         self.assertIsInstance(broker.seats["W"].policy, LlmAgentPlayer)
-        self.assertEqual(profiles[2].provider_name, "codex-cli")
-        self.assertIsNone(profiles[2].model_name)
-        self.assertEqual(profiles[2].codex_binary, "codex-test")
+        self.assertEqual(profiles[1].provider_name, "codex-cli")
+        self.assertIsNone(profiles[1].model_name)
+        self.assertEqual(profiles[1].codex_binary, "codex-test")
         self.assertEqual(broker.seats["W"].policy.config.model_name, "gpt-5.2")
         self.assertEqual(broker.seats["W"].policy.config.timeout_seconds, 120.0)
         self.assertEqual(broker.seats["W"].policy.config.personality, "defensive")
         self.assertEqual(broker.seats["W"].policy.config.memory_compaction_char_limit, 123)
         self.assertEqual(broker.seats["W"].policy.config.memory_recent_deal_scan_limit, 45)
         self.assertEqual(broker.seats["W"].policy.config.memory_max_output_tokens, 678)
+
+    def test_result_events_update_player_database_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "players.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "players": [
+                            {"seat": "S", "display_name": "South", "kind": "dummy"},
+                            {"seat": "W", "display_name": "West", "kind": "dummy", "deal_count": 4, "deal_wins": 2},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            broker = NpcBroker(FakeClient(), "table-1", player_db_path=path)
+            seats = broker.add_players(("S", "W"), lineup="mixed")
+
+            response = {
+                "events": [
+                    {"seq": 10, "type": "DealEnded", "payload": {"winning_team": "SN"}},
+                    {"seq": 11, "type": "MatchEnded", "payload": {"winning_team": "SN"}},
+                    {"seq": 10, "type": "DealEnded", "payload": {"winning_team": "SN"}},
+                ]
+            }
+            broker._notify_action_observers(seats[0], {"type": "pass"}, response)
+
+            players = {player["seat"]: player for player in json.loads(path.read_text(encoding="utf-8"))["players"]}
+
+        self.assertEqual(players["S"]["deal_count"], 1)
+        self.assertEqual(players["S"]["deal_wins"], 1)
+        self.assertEqual(players["S"]["deal_win_rate"], 1.0)
+        self.assertEqual(players["S"]["match_count"], 1)
+        self.assertEqual(players["S"]["match_wins"], 1)
+        self.assertEqual(players["S"]["match_win_rate"], 1.0)
+        self.assertEqual(players["W"]["deal_count"], 5)
+        self.assertEqual(players["W"]["deal_wins"], 2)
+        self.assertEqual(players["W"]["deal_win_rate"], 0.4)
+        self.assertEqual(players["W"]["match_count"], 1)
+        self.assertEqual(players["W"]["match_wins"], 0)
+        self.assertEqual(players["W"]["match_win_rate"], 0.0)
 
     def test_join_ready_and_poll_submit_are_owned_by_broker(self) -> None:
         client = FakeClient()

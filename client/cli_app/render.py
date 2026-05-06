@@ -205,10 +205,11 @@ def format_command_response(response: JsonObject) -> str:
     visible_events = [event for event in events if isinstance(event, dict) and event.get("type") not in HIDDEN_EVENT_TYPES]
     if not visible_events:
         return "No events.\n"
-    return "\n".join(format_event(event) for event in visible_events) + "\n"
+    current_trick = _response_current_trick(response)
+    return "\n".join(format_event(event, current_trick=current_trick) for event in visible_events) + "\n"
 
 
-def format_event(event: JsonObject) -> str:
+def format_event(event: JsonObject, *, current_trick: JsonObject | None = None) -> str:
     payload = event.get("payload", {})
     event_type = event.get("type")
     seq = event.get("seq")
@@ -217,6 +218,9 @@ def format_event(event: JsonObject) -> str:
         cards = format_card_list(payload.get("card_ids", ()))
         return f"{seq}: {seat} played {payload.get('hand_type')} {cards}"
     if event_type == "PlayerPassed":
+        trick = format_trick(current_trick)
+        if trick:
+            return f"{seq}: {seat} passed; last play {trick}"
         return f"{seq}: {seat} passed"
     if event_type == "ActionTimedOut":
         return f"{seq}: {payload.get('seat')} timed out on {payload.get('kind')}"
@@ -247,6 +251,14 @@ def format_event(event: JsonObject) -> str:
     if event_type == "TenCardReport":
         return f"{seq}: {seat} has {payload.get('remaining_count')} cards"
     return f"{seq}: {event_type} {payload}"
+
+
+def _response_current_trick(response: JsonObject) -> JsonObject | None:
+    snapshot = response.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    trick = snapshot.get("current_trick")
+    return trick if isinstance(trick, dict) else None
 
 
 def format_timeout_fallback(before: JsonObject, after: JsonObject, *, kind: str | None = None) -> str:
