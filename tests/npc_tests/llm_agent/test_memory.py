@@ -105,6 +105,7 @@ class LlmMemoryTests(unittest.TestCase):
             ["Let partner keep tempo when they are short."],
         )
         self.assertEqual(memory["player_profiles"]["Jade"]["latest_seat"], "S")
+        self.assertNotIn("last_deal_seq", memory["player_profiles"]["Jade"])
         self.assertEqual(memory["last_memory_deal_seq"], 9)
 
 

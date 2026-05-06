@@ -56,7 +56,7 @@ class MemoryAgent:
             return
 
         self._summarize_deal(memory, recent_actions, events, players_by_seat, observer_name, deal_seq)
-        self._analyze_players(memory, recent_actions, events, players_by_seat, observer_name, deal_seq)
+        self._analyze_players(memory, recent_actions, events, players_by_seat, observer_name)
         self._compact_if_needed(memory, recent_actions, events, players_by_seat, observer_name)
         if deal_seq is not None:
             memory["last_memory_deal_seq"] = deal_seq
@@ -96,7 +96,6 @@ class MemoryAgent:
         events: list[JsonObject],
         players_by_seat: JsonObject,
         observer_name: str,
-        deal_seq: int | None,
     ) -> None:
         response = self._complete(
             MEMORY_PLAYER_ANALYSIS_PROMPT,
@@ -122,8 +121,6 @@ class MemoryAgent:
                 continue
             profile: JsonObject = dict(raw_profile)
             profile["updated_at"] = _utc_now()
-            if deal_seq is not None:
-                profile["last_deal_seq"] = deal_seq
             profiles[name] = profile
 
     def _compact_if_needed(

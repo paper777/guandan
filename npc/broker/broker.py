@@ -108,6 +108,7 @@ class NpcBroker:
             acting_seat = public.get("acting_seat") or public.get("current_turn")
             if legal_action is None or acting_seat != broker_seat.seat:
                 continue
+            players_by_seat = self._players_by_seat(public)
 
             action = broker_seat.policy.choose_action(
                 ActionRequest(
@@ -126,7 +127,7 @@ class NpcBroker:
                         "seat": broker_seat.seat,
                         "hand": list(snapshot.get("hand", [])),
                         "legal_card_ids": list(snapshot.get("legal_card_ids", [])),
-                        "players_by_seat": self._players_by_seat(),
+                        "players_by_seat": players_by_seat,
                         "public": public,
                     },
                 )
@@ -176,6 +177,8 @@ class NpcBroker:
     def _notify_action_observers(self, actor: BrokerSeat, action: JsonObject, response: JsonObject) -> None:
         events = response.get("events", [])
         event_seq = response.get("event_seq")
+        response_snapshot = response.get("snapshot")
+        players_by_seat = self._players_by_seat(response_snapshot if isinstance(response_snapshot, dict) else None)
         for observer in self.seats.values():
             observe_action = getattr(observer.policy, "observe_action", None)
             if observe_action is None:
@@ -187,15 +190,26 @@ class NpcBroker:
                     "observer_name": observer.display_name,
                     "actor_seat": actor.seat,
                     "actor_name": actor.display_name,
-                    "players_by_seat": self._players_by_seat(),
+                    "players_by_seat": players_by_seat,
                     "action": action,
                     "events": events if isinstance(events, list) else [],
                     "event_seq": event_seq,
                 }
             )
 
-    def _players_by_seat(self) -> JsonObject:
-        return {seat: broker_seat.display_name for seat, broker_seat in self.seats.items()}
+    def _players_by_seat(self, public_snapshot: JsonObject | None = None) -> JsonObject:
+        players: JsonObject = {}
+        seats = public_snapshot.get("seats") if isinstance(public_snapshot, dict) else None
+        if isinstance(seats, dict):
+            for raw_seat, raw_player in seats.items():
+                if not isinstance(raw_player, dict):
+                    continue
+                name = str(raw_player.get("display_name") or "").strip()
+                if name:
+                    players[str(raw_seat)] = name
+        for seat, broker_seat in self.seats.items():
+            players.setdefault(seat, broker_seat.display_name)
+        return players
 
 
 def main() -> None:

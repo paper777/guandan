@@ -220,6 +220,17 @@ class NpcBrokerTests(unittest.TestCase):
         self.assertEqual(policy.requests[0].prompt["current_trick"]["card_ids"], ["D1-S-3"])
 
     def test_broker_passes_player_names_to_policy_and_observers(self) -> None:
+        class NamedTableClient(FakeClient):
+            def seat_snapshot(self, table_id, seat, controller_id):
+                snapshot = super().seat_snapshot(table_id, seat, controller_id)
+                snapshot["public"]["seats"] = _named_seats()
+                return snapshot
+
+            def play_cards(self, table_id, seat, controller_id, card_ids):
+                response = super().play_cards(table_id, seat, controller_id, card_ids)
+                response["snapshot"] = {"seats": _named_seats()}
+                return response
+
         class CapturingPolicy:
             def __init__(self):
                 self.requests = []
@@ -232,7 +243,15 @@ class NpcBrokerTests(unittest.TestCase):
             def observe_action(self, observation):
                 self.observations.append(observation)
 
-        client = FakeClient()
+        def _named_seats():
+            return {
+                "E": {"display_name": "Human East", "kind": "human"},
+                "S": {"display_name": "Jade", "kind": "agent"},
+                "W": {"display_name": "River", "kind": "agent"},
+                "N": {"display_name": "Human North", "kind": "human"},
+            }
+
+        client = NamedTableClient()
         south_policy = CapturingPolicy()
         west_policy = CapturingPolicy()
         broker = NpcBroker(client, "table-1")
@@ -243,10 +262,16 @@ class NpcBrokerTests(unittest.TestCase):
 
         broker.poll_once("S")
 
-        self.assertEqual(south_policy.requests[0].snapshot["players_by_seat"], {"S": "Jade", "W": "River"})
+        self.assertEqual(
+            south_policy.requests[0].snapshot["players_by_seat"],
+            {"E": "Human East", "S": "Jade", "W": "River", "N": "Human North"},
+        )
         self.assertEqual(west_policy.observations[0]["actor_name"], "Jade")
         self.assertEqual(west_policy.observations[0]["observer_name"], "River")
-        self.assertEqual(west_policy.observations[0]["players_by_seat"], {"S": "Jade", "W": "River"})
+        self.assertEqual(
+            west_policy.observations[0]["players_by_seat"],
+            {"E": "Human East", "S": "Jade", "W": "River", "N": "Human North"},
+        )
 
 
 if __name__ == "__main__":
