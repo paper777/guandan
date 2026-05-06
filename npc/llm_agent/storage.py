@@ -58,12 +58,15 @@ class JsonMemoryStore:
 
 
 class JsonActionLog:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, max_entries: int | None = None) -> None:
         self.path = path
+        self.max_entries = max_entries
 
     def append(self, entry: JsonObject) -> None:
         entries = self.load()
         entries.append({**entry, "recorded_at": _utc_now()})
+        if self.max_entries is not None and self.max_entries > 0:
+            entries = entries[-self.max_entries :]
         _write_json_atomic(self.path, entries)
 
     def load(self) -> list[JsonObject]:

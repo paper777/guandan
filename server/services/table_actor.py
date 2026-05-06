@@ -89,6 +89,7 @@ class TableActor:
     def public_snapshot(self) -> PublicTableSnapshot:
         return public_snapshot(
             self.state,
+            deal_id=self._deal_number,
             action_deadline_epoch_ms=self._active_prompt.deadline_epoch_ms if self._active_prompt else None,
             action_timeout_seconds=self.config.action_timeout_seconds,
             acting_seat=self._active_prompt.seat if self._active_prompt else None,
@@ -99,6 +100,7 @@ class TableActor:
             self.state,
             seat,
             controller_id,
+            deal_id=self._deal_number,
             action_deadline_epoch_ms=self._active_prompt.deadline_epoch_ms if self._active_prompt else None,
             action_timeout_seconds=self.config.action_timeout_seconds,
             acting_seat=self._active_prompt.seat if self._active_prompt else None,

@@ -57,7 +57,7 @@ class CapturingProvider:
 
     def choose_action(self, prompt):
         self.prompts.append(prompt)
-        if prompt["prompt"]["kind"] == "play_or_pass":
+        if prompt["table_context"]["prompt_kind"] == "play_or_pass":
             return {"type": "pass", "thinking": "Support by passing."}
         return {"type": "play_cards", "card_ids": [prompt["snapshot"]["hand"][0]], "thinking": "Lead one."}
 

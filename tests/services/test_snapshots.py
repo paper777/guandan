@@ -85,9 +85,31 @@ class SnapshotTests(unittest.TestCase):
         snapshot = seat_snapshot(state, Seat.EAST, "c-E")
 
         self.assertEqual(snapshot.legal_action, "tribute")
-        self.assertEqual(snapshot.legal_card_ids, ("D1-S-A",))
+        self.assertEqual(snapshot.eligible_card_ids, ("D1-S-A",))
         self.assertEqual(snapshot.tribute_to, Seat.SOUTH)
         self.assertIsNone(snapshot.tribute_from)
+
+    def test_tribute_snapshot_exposes_one_highest_eligible_card_when_tied(self) -> None:
+        state = make_state()
+        assert state.deal is not None
+        obligation = TributeObligation(giver=Seat.EAST, receiver=Seat.SOUTH)
+        deal = replace(
+            state.deal,
+            hands={
+                Seat.EAST: ("D1-S-A", "D2-S-A", "D1-S-3"),
+                Seat.SOUTH: ("D1-C-3",),
+                Seat.WEST: ("D1-C-4",),
+                Seat.NORTH: ("D1-C-5",),
+            },
+            turn=Seat.EAST,
+            tribute=TributeState(obligations=(obligation,), leader_after=Seat.EAST),
+        )
+        state = replace(state, phase=MatchPhase.TRIBUTE, deal=deal)
+
+        snapshot = seat_snapshot(state, Seat.EAST, "c-E")
+
+        self.assertEqual(snapshot.legal_action, "tribute")
+        self.assertEqual(snapshot.eligible_card_ids, ("D1-S-A",))
 
     def test_return_snapshot_exposes_low_card_constraint_for_partner_return(self) -> None:
         state = make_state()
@@ -112,9 +134,35 @@ class SnapshotTests(unittest.TestCase):
         snapshot = seat_snapshot(state, Seat.WEST, "c-W")
 
         self.assertEqual(snapshot.legal_action, "return_tribute")
-        self.assertEqual(snapshot.legal_card_ids, ("D1-S-10",))
+        self.assertEqual(snapshot.eligible_card_ids, ("D1-S-10",))
         self.assertEqual(snapshot.tribute_from, Seat.EAST)
         self.assertTrue(snapshot.return_rank_at_most_ten)
+
+    def test_return_snapshot_exposes_low_cards_for_non_partner_return(self) -> None:
+        state = make_state()
+        assert state.deal is not None
+        obligation = TributeObligation(giver=Seat.EAST, receiver=Seat.SOUTH, tribute_card_id="D1-S-A")
+        deal = DealState(
+            hands={
+                Seat.EAST: ("D1-S-3",),
+                Seat.SOUTH: ("D1-S-A", "D1-S-10", "D1-S-9"),
+                Seat.WEST: ("D1-C-4",),
+                Seat.NORTH: ("D1-C-5",),
+            },
+            active_seats=frozenset(SEATS),
+            finish_order=(),
+            leader=Seat.EAST,
+            turn=Seat.SOUTH,
+            current_trick=TrickState(lead_seat=Seat.EAST),
+            tribute=TributeState(obligations=(obligation,), leader_after=Seat.EAST),
+        )
+        state = replace(state, phase=MatchPhase.TRIBUTE, deal=deal)
+
+        snapshot = seat_snapshot(state, Seat.SOUTH, "c-S")
+
+        self.assertEqual(snapshot.legal_action, "return_tribute")
+        self.assertEqual(snapshot.eligible_card_ids, ("D1-S-10", "D1-S-9"))
+        self.assertFalse(snapshot.return_rank_at_most_ten)
 
 
 if __name__ == "__main__":

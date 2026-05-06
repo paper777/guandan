@@ -15,6 +15,7 @@ class LlmAgentConfig:
     storage_dir: str | Path = Path("../../data")
     memory_path: str | Path | None = None
     action_log_path: str | Path | None = None
+    audit_log_path: str | Path | None = None
     provider_name: str = "deterministic"
     model_name: str = "deterministic-guandan-v1"
     api_key: str | None = None
@@ -25,6 +26,7 @@ class LlmAgentConfig:
     temperature: float = 0.2
     max_output_tokens: int = 800
     max_recent_actions: int = 20
+    max_action_log_entries: int = 1000
     memory_compaction_char_limit: int = 16000
     memory_recent_deal_scan_limit: int = 200
     memory_max_output_tokens: int = 1200
@@ -45,6 +47,11 @@ class LlmAgentConfig:
         if self.action_log_path is not None:
             return Path(self.action_log_path)
         return Path(self.storage_dir) / self.namespace_for(seat) / "actions.json"
+
+    def resolved_audit_log_path(self) -> Path:
+        if self.audit_log_path is not None:
+            return Path(self.audit_log_path)
+        return Path(self.storage_dir) / "llm_completions.jsonl"
 
 
 def _safe_path_part(value: str) -> str:

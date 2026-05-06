@@ -685,7 +685,7 @@ class CliTests(unittest.TestCase):
                 },
                 "seat": "E",
                 "legal_action": "lead",
-                "legal_card_ids": ["D1-S-3"],
+                "eligible_card_ids": ["D1-S-3"],
                 "hand": ["D1-H-4", "D1-C-3", "D2-S-3"],
             }
         )
@@ -695,7 +695,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("S South 4", output)
         self.assertIn("W - 0 (F)", output)
         self.assertIn("N - 0", output)
-        self.assertIn("Legal cards: ♠️ 3", output)
+        self.assertIn("Eligible cards: ♠️ 3", output)
         self.assertNotIn("Your seat:", output)
 
     def test_friend_mark_identifies_partner_for_viewer_seat(self) -> None:

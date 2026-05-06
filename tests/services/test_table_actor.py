@@ -119,6 +119,7 @@ class TableActorTests(unittest.TestCase):
         self.assertEqual(actor.active_prompt.seat, Seat.EAST)
         self.assertEqual(actor.active_prompt.kind, "lead")
         self.assertEqual(snapshot.acting_seat, Seat.EAST)
+        self.assertEqual(snapshot.deal_id, 1)
         self.assertEqual(snapshot.action_timeout_seconds, 45)
         self.assertEqual(snapshot.action_deadline_epoch_ms, actor.active_prompt.deadline_epoch_ms)
 

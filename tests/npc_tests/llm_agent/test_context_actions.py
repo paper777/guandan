@@ -17,6 +17,9 @@ class AgentRequestContextTests(unittest.TestCase):
                     "seat": "S",
                     "hand": ["D1-S-3"],
                     "public": {
+                        "deal_id": 2,
+                        "phase": "PLAYING",
+                        "event_seq": 9,
                         "current_level": "2",
                         "current_turn": "S",
                         "hand_counts": {"E": 27, "S": 1, "W": 27, "N": 1},
@@ -30,6 +33,9 @@ class AgentRequestContextTests(unittest.TestCase):
         self.assertEqual(context.current_level, "3")
         self.assertEqual(context.table_context["partner"], "N")
         self.assertEqual(context.table_context["opponents"], ["E", "W"])
+        self.assertEqual(context.table_context["deal_id"], 2)
+        self.assertEqual(context.table_context["phase"], "PLAYING")
+        self.assertEqual(context.table_context["event_seq"], 9)
         self.assertEqual(context.table_context["current_level"], "3")
 
 

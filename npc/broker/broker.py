@@ -178,7 +178,7 @@ class NpcBroker:
                         "kind": legal_action,
                         "current_level": public.get("current_level", "2"),
                         "current_trick": public.get("current_trick"),
-                        "legal_card_ids": list(snapshot.get("legal_card_ids", [])),
+                        "eligible_card_ids": list(snapshot.get("eligible_card_ids", [])),
                         "tribute_from": snapshot.get("tribute_from"),
                         "tribute_to": snapshot.get("tribute_to"),
                         "return_rank_at_most_ten": bool(snapshot.get("return_rank_at_most_ten", False)),
@@ -187,7 +187,6 @@ class NpcBroker:
                         "table_id": self.table_id,
                         "seat": broker_seat.seat,
                         "hand": list(snapshot.get("hand", [])),
-                        "legal_card_ids": list(snapshot.get("legal_card_ids", [])),
                         "players_by_seat": players_by_seat,
                         "public": public,
                     },
@@ -249,6 +248,7 @@ class NpcBroker:
         event_seq = response.get("event_seq")
         response_snapshot = response.get("snapshot")
         players_by_seat = self._players_by_seat(response_snapshot if isinstance(response_snapshot, dict) else None)
+        deal_id = response_snapshot.get("deal_id") if isinstance(response_snapshot, dict) else None
         for observer in self.seats.values():
             observe_action = getattr(observer.policy, "observe_action", None)
             if observe_action is None:
@@ -261,6 +261,7 @@ class NpcBroker:
                     "actor_seat": actor.seat,
                     "actor_name": actor.display_name,
                     "players_by_seat": players_by_seat,
+                    "deal_id": deal_id,
                     "action": action,
                     "events": event_list,
                     "event_seq": event_seq,

@@ -154,6 +154,53 @@ class LlmAgentPolicyTests(unittest.TestCase):
                 {"type": "play_cards", "card_ids": ["D1-S-3"]},
             )
 
+    def test_provider_prompt_omits_eligible_card_ids_and_slim_public_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = StaticProvider({"type": "return_tribute", "card_id": "D1-S-3"})
+            policy = LlmAgentPlayer(LlmAgentConfig(storage_dir=tmp, seat="S"), provider=provider)
+
+            policy.choose_action(
+                ActionRequest(
+                    "r-tribute",
+                    {
+                        "kind": "return_tribute",
+                        "current_level": "2",
+                        "eligible_card_ids": ["D1-S-3"],
+                        "return_rank_at_most_ten": True,
+                    },
+                    {
+                        "table_id": "table-1",
+                        "seat": "S",
+                        "hand": ["D1-S-3", "D1-H-A"],
+                        "eligible_card_ids": ["D1-S-3"],
+                        "public": {
+                            "phase": "TRIBUTE",
+                            "event_seq": 8,
+                            "current_level": "2",
+                            "current_turn": "S",
+                            "acting_seat": "S",
+                            "hand_counts": {"E": 27, "S": 2, "W": 27, "N": 2},
+                            "finish_order": [],
+                            "current_trick": None,
+                            "seats": {"S": {"display_name": "South"}},
+                            "action_deadline_epoch_ms": 123,
+                            "action_timeout_seconds": 45,
+                        },
+                    },
+                )
+            )
+
+            prompt = provider.prompts[-1]
+            self.assertNotIn("prompt", prompt)
+            self.assertNotIn("eligible_card_ids", prompt["table_context"])
+            self.assertNotIn("eligible_card_ids", prompt["snapshot"])
+            self.assertEqual(prompt["snapshot"], {"hand": ["D1-S-3", "D1-H-A"]})
+            self.assertEqual(prompt["table_context"]["phase"], "TRIBUTE")
+            self.assertEqual(prompt["table_context"]["event_seq"], 8)
+            self.assertEqual(prompt["table_context"]["hand_counts"]["S"], 2)
+            self.assertEqual(prompt["table_context"]["prompt_kind"], "return_tribute")
+            self.assertEqual(prompt["table_context"]["return_rank_at_most_ten"], True)
+
     def test_play_or_pass_prompt_omits_deterministic_card_player_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-4"], "thinking": "Beat cheaply."})
@@ -183,9 +230,62 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertEqual(action["card_ids"], ["D1-S-4"])
             self.assertNotIn("card_player", provider.prompts[-1])
             self.assertEqual(
-                provider.prompts[-1]["prompt"]["current_trick"],
+                provider.prompts[-1]["table_context"]["current_trick"],
                 {"card_ids": ["D1-S-3"], "hand_type": "single", "last_play_seat": "E"},
             )
+
+    def test_provider_prompt_splits_memory_into_techniques_and_other_player_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_path = Path(tmp) / "memory.json"
+            memory_path.write_text(
+                json.dumps(
+                    {
+                        "player_name": "Jade",
+                        "seat": "S",
+                        "play_style": "aggressive",
+                        "score": {"deals_played": 3},
+                        "techniques": {
+                            "level1": [{"summary": "Transfer tempo.", "techniques": ["Lead low to partner."]}],
+                            "level2": {"team_coordination": ["Protect partner tempo."]},
+                        },
+                        "player_profiles": {
+                            "Jade": {"latest_seat": "S", "playing_style": "self profile"},
+                            "Ming": {"latest_seat": "E", "playing_style": "fast"},
+                            "River": {"latest_seat": "W", "playing_style": "patient"},
+                            "Atlas": {"latest_seat": "N", "playing_style": "defensive"},
+                            "Old Player": {"latest_seat": "E", "playing_style": "stale"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"]})
+            policy = LlmAgentPlayer(
+                LlmAgentConfig(memory_path=memory_path, action_log_path=Path(tmp) / "actions.json", seat="S"),
+                provider=provider,
+            )
+
+            policy.choose_action(
+                ActionRequest(
+                    "r-1",
+                    {"kind": "lead", "current_level": "2"},
+                    {
+                        "seat": "S",
+                        "hand": ["D1-S-3"],
+                        "players_by_seat": {"E": "Ming", "S": "Jade", "W": "River", "N": "Atlas"},
+                        "public": {"current_level": "2", "current_turn": "S"},
+                    },
+                )
+            )
+
+            prompt = provider.prompts[-1]
+
+        self.assertNotIn("memory", prompt)
+        self.assertNotIn("user_profile", prompt)
+        self.assertEqual(prompt["techniques"]["level1"][0]["summary"], "Transfer tempo.")
+        self.assertEqual(set(prompt["player_profiles"]), {"Ming", "River", "Atlas"})
+        self.assertNotIn("Jade", prompt["player_profiles"])
+        self.assertNotIn("Old Player", prompt["player_profiles"])
 
     def test_explicit_player_storage_paths_are_used(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,6 +340,21 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertEqual([entry["seat"] for entry in actions], ["S", "W"])
             self.assertEqual(_read_json(Path(tmp) / "Jade" / "memory.json")["seat"], "W")
 
+    def test_action_log_is_capped_by_configured_entry_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = LlmAgentPolicy(
+                LlmAgentConfig(storage_dir=tmp, seat="S", max_action_log_entries=2),
+                provider=StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"]}),
+            )
+
+            policy.choose_action(_lead_request("S", request_id="r-1"))
+            policy.choose_action(_lead_request("S", request_id="r-2"))
+            policy.choose_action(_lead_request("S", request_id="r-3"))
+
+            actions = _read_json(Path(tmp) / "S" / "actions.json")
+
+        self.assertEqual([entry["request_id"] for entry in actions], ["r-2", "r-3"])
+
     def test_invalid_provider_action_falls_back_and_logs_llm_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             action_path = Path(tmp) / "actions.json"
@@ -292,11 +407,112 @@ class LlmAgentPolicyTests(unittest.TestCase):
             west.choose_action(_lead_request("W"))
             south.choose_action(_lead_request("S"))
 
-            self.assertEqual(south_provider.prompts[-1]["recent_actions"][0]["seat"], "S")
+            self.assertEqual(south_provider.prompts[-1]["recent_actions"][0]["actor_seat"], "S")
             south_memory = json.dumps(_read_json(Path(tmp) / "South-Agent" / "memory.json"))
             west_memory = json.dumps(_read_json(Path(tmp) / "West-Agent" / "memory.json"))
             self.assertNotIn("West skill", south_memory)
             self.assertNotIn("South skill", west_memory)
+
+    def test_provider_prompt_recent_actions_are_limited_to_current_deal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            action_path = Path(tmp) / "actions.json"
+            action_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "kind": "decision",
+                            "deal_id": 1,
+                            "seat": "S",
+                            "event_seq": 4,
+                            "selected_action": {"type": "play_cards", "card_ids": ["D1-S-4"]},
+                        },
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 1,
+                            "actor_seat": "S",
+                            "event_seq": 5,
+                            "action": {"type": "play_cards", "card_ids": ["D1-S-5"]},
+                            "response_events": [
+                                {"seq": 5, "type": "CardsPlayed", "payload": {"seat": "S"}},
+                            ],
+                        },
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 1,
+                            "actor_seat": "N",
+                            "event_seq": 10,
+                            "action": {"type": "play_cards", "card_ids": ["D1-S-6"]},
+                            "response_events": [
+                                {"seq": 10, "type": "DealEnded", "payload": {"winning_team": "SN"}},
+                            ],
+                        },
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 2,
+                            "actor_seat": "W",
+                            "actor_name": "River",
+                            "event_seq": 15,
+                            "action": {"type": "play_cards", "card_ids": ["D1-S-7"]},
+                            "response_events": [
+                                {"seq": 15, "type": "CardsPlayed", "payload": {"seat": "W"}},
+                            ],
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"]})
+            policy = LlmAgentPolicy(
+                LlmAgentConfig(action_log_path=action_path, memory_path=Path(tmp) / "memory.json"),
+                provider=provider,
+            )
+
+            policy.choose_action(_lead_request("S", deal_id=2))
+
+            recent_actions = provider.prompts[-1]["recent_actions"]
+
+        self.assertEqual(len(recent_actions), 1)
+        self.assertEqual(
+            recent_actions[0],
+            {
+                "actor_seat": "W",
+                "actor_name": "River",
+                "action": {"type": "play_cards", "card_ids": ["D1-S-7"]},
+            },
+        )
+        self.assertNotIn("response_events", recent_actions[0])
+
+    def test_provider_prompt_recent_actions_empty_after_deal_end_until_current_deal_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            action_path = Path(tmp) / "actions.json"
+            action_path.write_text(
+                json.dumps(
+                    [
+                        {"kind": "decision", "deal_id": 1, "seat": "S", "event_seq": 4},
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 1,
+                            "actor_seat": "N",
+                            "event_seq": 10,
+                            "response_events": [
+                                {"seq": 10, "type": "DealEnded", "payload": {"winning_team": "SN"}},
+                            ],
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"]})
+            policy = LlmAgentPolicy(
+                LlmAgentConfig(action_log_path=action_path, memory_path=Path(tmp) / "memory.json"),
+                provider=provider,
+            )
+
+            policy.choose_action(_lead_request("S", deal_id=2))
+
+            recent_actions = provider.prompts[-1]["recent_actions"]
+
+        self.assertEqual(recent_actions, [])
 
     def test_deal_end_updates_techniques_and_name_keyed_player_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -305,10 +521,32 @@ class LlmAgentPolicyTests(unittest.TestCase):
                 LlmAgentConfig(storage_dir=tmp, player_name="Jade", seat="S"),
                 memory_agent=memory_agent,
             )
+            action_path = Path(tmp) / "Jade" / "actions.json"
+            action_path.parent.mkdir(parents=True, exist_ok=True)
+            action_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 1,
+                            "actor_seat": "E",
+                            "action": {"type": "play_cards", "card_ids": ["D1-S-A"]},
+                        },
+                        {
+                            "kind": "observed_action",
+                            "deal_id": 2,
+                            "actor_seat": "W",
+                            "action": {"type": "pass"},
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
 
             policy.observe_action(
                 {
                     "table_id": "table-1",
+                    "deal_id": 2,
                     "observer_seat": "S",
                     "observer_name": "Jade",
                     "actor_seat": "S",
@@ -335,6 +573,9 @@ class LlmAgentPolicyTests(unittest.TestCase):
             memory = _read_json(Path(tmp) / "Jade" / "memory.json")
             self.assertEqual(memory_agent.calls[0]["observer_name"], "Jade")
             self.assertEqual(memory_agent.calls[0]["players_by_seat"]["S"], "Jade")
+            self.assertEqual([entry["deal_id"] for entry in memory_agent.calls[0]["recent_actions"]], [2, 2])
+            self.assertEqual(memory_agent.calls[0]["recent_actions"][0]["actor_seat"], "W")
+            self.assertEqual(memory_agent.calls[0]["recent_actions"][1]["actor_seat"], "S")
             self.assertEqual(memory["techniques"]["level1"][0]["summary"], "Partner delivery worked.")
             self.assertIn("Jade", memory["player_profiles"])
             self.assertEqual(memory["player_profiles"]["Jade"]["latest_seat"], "S")
@@ -371,21 +612,24 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertNotIn("hands", json.dumps(entry))
 
 
-def _lead_request(seat: str) -> ActionRequest:
+def _lead_request(seat: str, *, deal_id: int | None = None, request_id: str | None = None) -> ActionRequest:
+    public = {
+        "phase": "PLAYING",
+        "event_seq": 4,
+        "current_level": "2",
+        "current_turn": seat,
+        "hand_counts": {"E": 27, "S": 1, "W": 1, "N": 27},
+    }
+    if deal_id is not None:
+        public["deal_id"] = deal_id
     return ActionRequest(
-        request_id=f"r-{seat}",
+        request_id=request_id or f"r-{seat}",
         prompt={"kind": "lead", "current_level": "2"},
         snapshot={
             "table_id": "table-1",
             "seat": seat,
             "hand": ["D1-S-3"],
-            "public": {
-                "phase": "PLAYING",
-                "event_seq": 4,
-                "current_level": "2",
-                "current_turn": seat,
-                "hand_counts": {"E": 27, "S": 1, "W": 1, "N": 27},
-            },
+            "public": public,
         },
     )
 

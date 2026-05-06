@@ -36,6 +36,9 @@ class AgentRequestContext:
             "team": team_for_seat(seat) if seat in VALID_SEATS else None,
             "partner": partner_for_seat(seat),
             "opponents": list(opponents_for_seat(seat)),
+            "deal_id": public_snapshot.get("deal_id"),
+            "phase": public_snapshot.get("phase"),
+            "event_seq": public_snapshot.get("event_seq"),
             "prompt_kind": request.prompt.get("kind"),
             "current_level": request.prompt.get("current_level") or public_snapshot.get("current_level"),
             "current_turn": public_snapshot.get("current_turn"),
@@ -43,6 +46,12 @@ class AgentRequestContext:
             "hand_counts": public_snapshot.get("hand_counts", {}),
             "finish_order": public_snapshot.get("finish_order", []),
         }
+        if current_trick is not None:
+            table_context["current_trick"] = current_trick
+        for key in ("tribute_from", "tribute_to", "return_rank_at_most_ten"):
+            value = request.prompt.get(key)
+            if value is not None:
+                table_context[key] = value
         return cls(
             request=request,
             seat=seat,
@@ -143,13 +152,12 @@ def highest_eligible_tribute_card(card_ids: tuple[str, ...], level: str) -> str 
 
 
 def safe_snapshot(snapshot: JsonObject) -> JsonObject:
-    public = snapshot.get("public")
+    return model_snapshot(snapshot)
+
+
+def model_snapshot(snapshot: JsonObject) -> JsonObject:
     return {
-        "table_id": snapshot.get("table_id"),
-        "seat": snapshot.get("seat"),
         "hand": list(snapshot.get("hand", [])),
-        "legal_card_ids": list(snapshot.get("legal_card_ids", [])),
-        "public": public if isinstance(public, dict) else {},
     }
 
 

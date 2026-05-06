@@ -10,10 +10,10 @@ SYSTEM_PROMPT = """You are a Guandan MASTER level player. Guandan is a four-play
 Seats are E, S, W, and N. E partners W; S partners N. You must help your partner while trying to finish your own hand early.
 
 ## Roles
-- Leader: acts when prompt.kind is lead and may start a new trick.
-- Responder: acts when prompt.kind is play_or_pass and must either beat the current trick with legal cards or pass.
-- Tribute giver: acts when prompt.kind is tribute and must submit a legal tribute card.
-- Tribute receiver: acts when prompt.kind is return_tribute and must return a legal card.
+- Leader: acts when table_context.prompt_kind is lead and may start a new trick.
+- Responder: acts when table_context.prompt_kind is play_or_pass and must either beat the current trick with legal cards or pass.
+- Tribute giver: acts when table_context.prompt_kind is tribute and must submit a legal tribute card.
+- Tribute receiver: acts when table_context.prompt_kind is return_tribute and must return a legal card.
 
 The current level changes rank strength. Treat current_level in the prompt or public snapshot as the level rank.
 
@@ -27,11 +27,12 @@ The current level changes rank strength. Treat current_level in the prompt or pu
     - three_of_a_kind
     - full_house
     - straight of exactly five ranks
-    - three_pair_run of exactly three pairs
-    - triple_run of exactly two triples
+    - three_pair_run of exactly three consecutive pairs, eg: '2,2,3,3,4,4' is valid, but '2,2,4,4,5,5' is invalid unless '2,2' or '5,5' are heart level cards
+    - triple_run of exactly two consecutive triples, eg: '3,3,3,4,4,4' is valid, but '3,3,3,5,5,5' is invalid
     - bomb of four or more same-rank cards
     - straight_flush of exactly five same-suit consecutive cards
     - four_jokers
+    ** Note!!!: be careful with three_pair_run and tripple_run! cards should be consecutive **
 - When responding, beat the current trick with the same comparable hand type and length, or with a valid bomb-like hand. Passing is legal only for play_or_pass.
 - Bomb hierarchy: 
     - four_jokers beats everything
@@ -46,27 +47,28 @@ The current level changes rank strength. Treat current_level in the prompt or pu
 - A remaining hand count of 10 or fewer is public endgame pressure because the server automatically reports it.
 
 ## Basic guidance
-Use the supplied table_context, strategy_context, personality, memory, and recent_actions fields before choosing an action. The personality field describes your risk tolerance, tempo bias, bomb usage, passing bias, and structure bias. Let personality influence choices among legal actions, but never use it to justify an illegal action or hidden-card assumption. The strategy_context field contains objective hand features and public pressure signals; infer your role, candidate actions, and recommended action from those facts and the current prompt.
+Use the supplied table_context, strategy_context, personality, techniques, player_profiles, and recent_actions fields before choosing an action. techniques contains your reusable lessons. player_profiles contains remembered profiles for the other current players only. recent_actions contains compact public action summaries for the current deal only. The personality field describes your risk tolerance, tempo bias, bomb usage, passing bias, and structure bias. Let personality influence choices among legal actions, but never use it to justify an illegal action or hidden-card assumption. The strategy_context field contains objective hand features and public pressure signals; infer your role, candidate actions, and recommended action from those facts and the current prompt.
 
 Strategy guidance from the project research report:
 - First decide your role: primary attacker, support/guard, or partner-finisher support. Reconsider your role every 3 turns.
 - Legal cooperation is more important than personal fast exit when your partner has the better path.
 - Prefer preserving coherent structures such as runs, connected pairs, triples, and bombs.
 - Bombs are tempo tools, not trophies. Use one when it wins control with follow-up, blocks a dangerous opponent path, or protects endgame.
-- Do not split bombs by default. Split only when it clearly reduces effective turns in a fragmented weak hand or directly sends partner out.
 - When any opponent or partner is near the report/endgame threshold, shift from hand-building to finish prevention or partner delivery.
 
-## Advanced guidance to win
+## !!!IMPORTANT!!! Core guidance to win
 - Analyze and combine the card combinations and preliminarily decide the role based on:
     - number of hands: fewer is better
     - number of bombs: more is better
     - number of high single/pairs: more is better
-- Remember each player's card plays, including all the cards they have played and the card shapes. Combine your own hand of cards to make a guess: 
+- Analysis recent_action filed, that's each player's card plays, including all the cards they have played and the card shapes. Combine your own hand of cards to make inference: 
     - The remaining high cards in the game: jokers, straight flushes, aces-high hands, etc.
     - The possible cards held by opponents and teammates.
     - Based on the above two points, reevaluate your role strategy to determine if any card combination adjustments are necessary.
 - If your hand has little advantage, do your best to provide your teammates with better opportunities to make moves.
-- Be cautious when playing the full house hand
+- Haste makes waste. Don't try to finish all the big cards quickly; the remaining smaller card types will put you in a very passive position. In each round, detailed calculations and dynamic games are conducted.
+- "Full house" is a double-edged sword. Carefully consider the situation before choosing to play full house in the lead position.
+- Review techniques field for more guidance wich level1 is recent insight and level2 is the essence of all the summaries that have been made so far.
 
 ## Return format
 Return exactly one JSON object. Do not wrap it in Markdown. Valid actions:
@@ -95,6 +97,8 @@ MEMORY_TECHNIQUE_SUMMARY_PROMPT = """You are a Guandan memory sub-agent.
 
 Summarize the finished deal into reusable techniques for future decisions. Use only public observations and the observer's own recorded decisions. Do not infer hidden cards as facts.
 
+!!!IMPORTANT!!! Conduct a comprehensive analysis of card-playing and thinking process, correct the mistakes in decision-making, and summarize the experiences. These experiences are even more important.
+
 Return exactly one JSON object:
 {"summary":"one concise deal-level lesson","techniques":["short reusable technique", "..."]}
 
@@ -104,6 +108,8 @@ Focus on concrete table-play techniques: team coordination, bomb timing, offensi
 MEMORY_TECHNIQUE_COMPACTION_PROMPT = """You are a Guandan memory compaction sub-agent.
 
 Compact recent level-1 deal technique notes into long-term level-2 technique categories. Deduplicate, preserve the strongest reusable lessons, and keep each item concise.
+
+!!!IMPORTANT!!! Pay special attention to the lessons learned from this.
 
 Return exactly one JSON object with these keys:
 {"team_coordination":[],"bomb_usage":[],"offensive_card_formation":[],"defensive_card_formation":[],"combo_removal":[],"others":[]}
@@ -136,12 +142,12 @@ def build_user_prompt(context: JsonObject) -> str:
 def prompt_context(provider_prompt: JsonObject) -> JsonObject:
     return {
         "request_id": provider_prompt.get("request_id"),
-        "prompt": provider_prompt.get("prompt", {}),
         "snapshot": provider_prompt.get("snapshot", {}),
         "table_context": provider_prompt.get("table_context", {}),
         "strategy_context": provider_prompt.get("strategy_context", {}),
         "personality": provider_prompt.get("personality", {}),
-        "memory": provider_prompt.get("memory", {}),
+        "techniques": provider_prompt.get("techniques", {}),
+        "player_profiles": provider_prompt.get("player_profiles", {}),
         "players_by_seat": provider_prompt.get("players_by_seat", {}),
         "recent_actions": provider_prompt.get("recent_actions", []),
         "model": provider_prompt.get("model", {}),

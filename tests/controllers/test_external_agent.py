@@ -12,6 +12,7 @@ class ExternalAgentClientTests(unittest.TestCase):
     def test_build_payload_filters_to_seat_private_hand(self) -> None:
         public = PublicTableSnapshot(
             table_id="table-1",
+            deal_id=1,
             phase=MatchPhase.PLAYING,
             seats={},
             hand_counts={Seat.EAST: 2, Seat.SOUTH: 27},

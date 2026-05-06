@@ -14,7 +14,7 @@ class DummyBotPolicy(Player):
         prompt_kind = request.prompt.get("kind")
         level = str(request.prompt.get("current_level", "2"))
         hand = tuple(str(card_id) for card_id in request.snapshot.get("hand", []))
-        legal_card_ids = tuple(str(card_id) for card_id in request.prompt.get("legal_card_ids", []))
+        eligible_card_ids = tuple(str(card_id) for card_id in request.prompt.get("eligible_card_ids", []))
 
         if prompt_kind == "play_or_pass":
             return {"type": "pass"}
@@ -23,15 +23,15 @@ class DummyBotPolicy(Player):
                 return {"type": "error", "message": "cannot lead with an empty hand"}
             return {"type": "play_cards", "card_ids": [_lowest_card_id(hand, level)]}
         if prompt_kind == "tribute":
-            if legal_card_ids:
-                return {"type": "submit_tribute", "card_id": legal_card_ids[0]}
+            if eligible_card_ids:
+                return {"type": "submit_tribute", "card_id": eligible_card_ids[0]}
             card_id = _highest_eligible_tribute_card(hand, level)
             if card_id is None:
                 return {"type": "error", "message": "no eligible tribute card"}
             return {"type": "submit_tribute", "card_id": card_id}
         if prompt_kind == "return_tribute":
-            if legal_card_ids:
-                return {"type": "return_tribute", "card_id": _lowest_card_id(legal_card_ids, level)}
+            if eligible_card_ids:
+                return {"type": "return_tribute", "card_id": _lowest_card_id(eligible_card_ids, level)}
             if request.prompt.get("return_rank_at_most_ten", False):
                 hand = tuple(card_id for card_id in hand if _rank_at_most_ten(card_id))
             if not hand:

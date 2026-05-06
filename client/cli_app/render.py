@@ -64,9 +64,9 @@ def format_seat_snapshot(snapshot: JsonObject, *, npc_metadata: dict[str, str] |
     public_snapshot = public if isinstance(public, dict) else {}
     lines = _public_snapshot_lines(public_snapshot, viewer_seat=snapshot.get("seat"), npc_metadata=npc_metadata)
     lines.append(f"Action: {snapshot.get('legal_action') or '-'}")
-    legal_cards = snapshot.get("legal_card_ids")
-    if isinstance(legal_cards, (list, tuple)) and legal_cards:
-        lines.append("Legal cards: " + format_hand(legal_cards))
+    eligible_cards = snapshot.get("eligible_card_ids")
+    if isinstance(eligible_cards, (list, tuple)) and eligible_cards:
+        lines.append("Eligible cards: " + format_hand(eligible_cards))
     lines.append("Hand: " + format_hand(snapshot.get("hand", ())))
     return _render_panel(lines, title="Your Seat")
 

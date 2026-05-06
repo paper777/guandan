@@ -40,7 +40,7 @@ class DummyBotPolicyTests(unittest.TestCase):
         action = DummyBotPolicy().choose_action(
             ActionRequest(
                 "r-1",
-                {"kind": "return_tribute", "current_level": "2", "legal_card_ids": ["D1-S-10"]},
+                {"kind": "return_tribute", "current_level": "2", "eligible_card_ids": ["D1-S-10"]},
                 {"hand": ["D1-S-10", "D1-S-A"]},
             )
         )

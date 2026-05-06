@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from npc.llm_agent.models import (
     ClaudeMessagesModelClient,
@@ -96,11 +99,12 @@ class ModelAdapterTests(unittest.TestCase):
         model = FakeModel()
         provider = ModelBackedLlmProvider(model, model_name="model-a")
 
-        action = provider.choose_action({"prompt": {"kind": "play_or_pass"}, "snapshot": {"hand": []}})
+        action = provider.choose_action({"table_context": {"prompt_kind": "play_or_pass"}, "snapshot": {"hand": []}})
 
         self.assertEqual(action["type"], "pass")
         self.assertIn("Guandan MASTER level player", model.requests[0].system_prompt)
         self.assertIn("strategy_context", model.requests[0].user_prompt)
+        self.assertNotIn('"prompt"', model.requests[0].user_prompt)
         self.assertNotIn("card_player", model.requests[0].user_prompt)
         self.assertNotIn('"skills"', model.requests[0].user_prompt)
         self.assertEqual(model.requests[0].model, "model-a")
@@ -129,6 +133,72 @@ class ModelAdapterTests(unittest.TestCase):
         self.assertEqual(model.requests[0].model, "model-a")
         self.assertEqual(model.requests[0].max_output_tokens, 1200)
 
+    def test_model_backed_provider_audits_action_and_memory_completions(self) -> None:
+        class FakeModel:
+            def __init__(self):
+                self.requests = []
+
+            def complete(self, request):
+                self.requests.append(request)
+                if "deal_events" in request.user_prompt:
+                    content = '{"summary":"Learned.","techniques":[]}'
+                else:
+                    content = '{"type":"pass"}'
+                return type("Response", (), {"content": content, "raw": {"content": content}})()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audit_path = Path(tmp) / "llm_completions.jsonl"
+            provider = ModelBackedLlmProvider(FakeModel(), model_name="model-a", audit_log_path=audit_path)
+
+            provider.choose_action(
+                {"request_id": "r-1", "table_context": {"prompt_kind": "play_or_pass"}, "snapshot": {"hand": []}}
+            )
+            provider.complete_memory(
+                system_prompt=MEMORY_TECHNIQUE_SUMMARY_PROMPT,
+                context={"deal_events": []},
+            )
+
+            entries = [
+                json.loads(line)
+                for line in audit_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual([entry["purpose"] for entry in entries], ["action", "memory"])
+        self.assertEqual(entries[0]["metadata"]["request_id"], "r-1")
+        self.assertEqual(entries[0]["request"]["model"], "model-a")
+        self.assertIn("started_at", entries[0]["timing"])
+        self.assertIn("completed_at", entries[0]["timing"])
+        self.assertIsInstance(entries[0]["timing"]["duration_ms"], float)
+        self.assertGreaterEqual(entries[0]["timing"]["duration_ms"], 0.0)
+        self.assertEqual(entries[0]["timestamp"], entries[0]["timing"]["completed_at"])
+        self.assertIn("Guandan MASTER level player", entries[0]["request"]["system_prompt"])
+        self.assertEqual(entries[0]["response"]["content"], '{"type":"pass"}')
+        self.assertEqual(entries[1]["request"]["system_prompt"], MEMORY_TECHNIQUE_SUMMARY_PROMPT)
+        self.assertIn("duration_ms", entries[1]["timing"])
+        self.assertEqual(entries[1]["response"]["raw"]["content"], '{"summary":"Learned.","techniques":[]}')
+
+    def test_model_backed_provider_audits_failed_completion(self) -> None:
+        class FailingModel:
+            def complete(self, request):
+                raise RuntimeError("model unavailable")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audit_path = Path(tmp) / "llm_completions.jsonl"
+            provider = ModelBackedLlmProvider(FailingModel(), model_name="model-a", audit_log_path=audit_path)
+
+            with self.assertRaises(RuntimeError):
+                provider.choose_action(
+                    {"request_id": "r-1", "table_context": {"prompt_kind": "lead"}, "snapshot": {"hand": []}}
+                )
+
+            entry = json.loads(audit_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(entry["purpose"], "action")
+        self.assertIn("timing", entry)
+        self.assertGreaterEqual(entry["timing"]["duration_ms"], 0.0)
+        self.assertEqual(entry["error"]["type"], "RuntimeError")
+        self.assertEqual(entry["error"]["message"], "model unavailable")
+
     def test_provider_factory_allows_codex_cli_without_api_key(self) -> None:
         provider = provider_from_config(
             LlmAgentConfig(provider_name="codex-cli", codex_binary="codex-test")
@@ -138,6 +208,7 @@ class ModelAdapterTests(unittest.TestCase):
         self.assertIsInstance(provider.model_client, CodexCliModelClient)
         self.assertEqual(provider.model_name, "gpt-5.2")
         self.assertEqual(provider.timeout_seconds, 120.0)
+        self.assertEqual(provider.audit_log_path, Path("../../data") / "llm_completions.jsonl")
 
 
 def _request() -> ModelRequest:

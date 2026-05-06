@@ -10,6 +10,7 @@ from npc.llm_agent.actions import validate_action
 from npc.llm_agent.config import LlmAgentConfig
 from npc.llm_agent.context import (
     AgentRequestContext,
+    model_snapshot,
     public_value,
     safe_snapshot,
     seat_from_request,
@@ -117,6 +118,7 @@ class LlmAgentPlayer(Player):
             "kind": "decision",
             "request_id": request.request_id,
             "table_id": snapshot_value(request, "table_id"),
+            "deal_id": public_value(request, "deal_id"),
             "seat": seat,
             "event_seq": public_value(request, "event_seq"),
             "phase": public_value(request, "phase"),
@@ -153,6 +155,7 @@ class LlmAgentPlayer(Player):
                 "observer_name": observer_name,
                 "actor_seat": observation.get("actor_seat"),
                 "actor_name": observation.get("actor_name"),
+                "deal_id": observation.get("deal_id"),
                 "players_by_seat": _players_by_seat_from_observation(observation),
                 "action": observation.get("action"),
                 "response_events": observation.get("events", []),
@@ -167,6 +170,7 @@ class LlmAgentPlayer(Player):
             action_log=action_log,
             players_by_seat=_players_by_seat_from_observation(observation),
             observer_name=observer_name,
+            deal_id=observation.get("deal_id"),
         )
 
     @property
@@ -187,7 +191,10 @@ class LlmAgentPlayer(Player):
             player_name=display_name,
             seat=seat or self.config.seat,
         )
-        action_log = JsonActionLog(self.config.resolved_action_log_path(seat))
+        action_log = JsonActionLog(
+            self.config.resolved_action_log_path(seat),
+            max_entries=self.config.max_action_log_entries,
+        )
         stores = (memory_store, action_log)
         self._stores_by_namespace[key] = stores
         return stores
@@ -202,17 +209,23 @@ class LlmAgentPlayer(Player):
         strategy_context: JsonObject,
         personality: JsonObject,
     ) -> JsonObject:
+        players_by_seat = _players_by_seat_from_request(request)
+        user_name = _user_name(table_context, players_by_seat, memory)
         return {
             "request_id": request.request_id,
-            "prompt": request.prompt,
-            "snapshot": request.snapshot,
+            "snapshot": model_snapshot(request.snapshot),
+            "techniques": _memory_techniques(memory),
             "table_context": table_context,
             "strategy_context": strategy_context,
             "personality": personality,
-            "memory": memory,
-            "players_by_seat": _players_by_seat_from_request(request),
-            "recent_actions": action_log.recent(self.config.max_recent_actions),
+            "players_by_seat": players_by_seat,
+            "recent_actions": _recent_current_deal_actions(
+                action_log,
+                self.config.max_recent_actions,
+                deal_id=public_value(request, "deal_id"),
+            ),
             "system_prompt": SYSTEM_PROMPT,
+            "player_profiles": _other_player_profiles(memory, table_context, players_by_seat, user_name),
             "model": {
                 "provider": self.config.provider_name,
                 "name": self.config.model_name,
@@ -239,6 +252,7 @@ class LlmAgentPlayer(Player):
         action_log: JsonActionLog | None = None,
         players_by_seat: JsonObject | None = None,
         observer_name: str | None = None,
+        deal_id: object = None,
     ) -> None:
         updates = provider_action.get("memory_updates")
         if isinstance(updates, dict):
@@ -259,7 +273,11 @@ class LlmAgentPlayer(Player):
         if events and action_log is not None:
             self.memory_agent.process_deal(
                 memory,
-                recent_actions=action_log.recent(self.config.memory_recent_deal_scan_limit),
+                recent_actions=_recent_current_deal_entries(
+                    action_log,
+                    self.config.memory_recent_deal_scan_limit,
+                    deal_id=deal_id,
+                ),
                 events=events,
                 players_by_seat=players_by_seat or {},
                 observer_name=observer_name or str(memory.get("player_name") or self.config.display_name_for(None)),
@@ -285,6 +303,101 @@ def _llm_output_for_log(provider_action: JsonObject) -> JsonObject:
     if provider_action.get("type") == "error" and isinstance(message, str) and message.strip():
         output["provider_error"] = message.strip()
     return output
+
+
+def _memory_techniques(memory: JsonObject) -> JsonObject:
+    techniques = memory.get("techniques")
+    return techniques if isinstance(techniques, dict) else {}
+
+
+def _other_player_profiles(
+    memory: JsonObject,
+    table_context: JsonObject,
+    players_by_seat: JsonObject,
+    user_name: str | None,
+) -> JsonObject:
+    profiles = memory.get("player_profiles")
+    if not isinstance(profiles, dict):
+        return {}
+    seat = str(table_context.get("seat") or "")
+    current_other_names = {
+        str(name)
+        for raw_seat, name in players_by_seat.items()
+        if str(raw_seat) != seat and str(name).strip()
+    }
+    if current_other_names:
+        return {
+            name: profiles[name]
+            for name in current_other_names
+            if name in profiles and isinstance(profiles[name], dict)
+        }
+    return {
+        str(name): profile
+        for name, profile in profiles.items()
+        if str(name) != (user_name or "") and isinstance(profile, dict)
+    }
+
+
+def _user_name(table_context: JsonObject, players_by_seat: JsonObject, memory: JsonObject) -> str | None:
+    seat = table_context.get("seat")
+    if seat is not None:
+        name = players_by_seat.get(str(seat))
+        if name is not None:
+            return str(name)
+    name = memory.get("player_name")
+    return str(name) if name is not None else None
+
+
+def _recent_current_deal_actions(action_log: JsonActionLog, limit: int, *, deal_id: object = None) -> list[JsonObject]:
+    return [_action_summary(entry) for entry in _recent_current_deal_entries(action_log, limit, deal_id=deal_id)]
+
+
+def _recent_current_deal_entries(action_log: JsonActionLog, limit: int, *, deal_id: object = None) -> list[JsonObject]:
+    if limit <= 0:
+        return []
+    entries = action_log.load()
+    if deal_id is not None:
+        current_deal_entries = [entry for entry in entries if entry.get("deal_id") == deal_id]
+    else:
+        start = 0
+        for index, entry in enumerate(entries):
+            if _has_deal_boundary(entry):
+                start = index + 1
+        current_deal_entries = entries[start:]
+    return current_deal_entries[-limit:]
+
+
+def _action_summary(entry: JsonObject) -> JsonObject:
+    action = entry.get("action") if entry.get("kind") == "observed_action" else entry.get("selected_action")
+    actor_seat = entry.get("actor_seat") or entry.get("seat")
+    actor_name = entry.get("actor_name")
+    if actor_name is None:
+        players_by_seat = entry.get("players_by_seat")
+        if isinstance(players_by_seat, dict) and actor_seat is not None:
+            actor_name = players_by_seat.get(str(actor_seat))
+    summary: JsonObject = {
+        "actor_seat": actor_seat,
+        "action": action if isinstance(action, dict) else None,
+    }
+    if actor_name is not None:
+        summary["actor_name"] = actor_name
+    legal_action = entry.get("legal_action")
+    if legal_action is not None:
+        summary["legal_action"] = legal_action
+    fallback_used = entry.get("fallback_used")
+    if fallback_used is not None:
+        summary["fallback_used"] = bool(fallback_used)
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _has_deal_boundary(entry: JsonObject) -> bool:
+    events = entry.get("response_events")
+    if not isinstance(events, list):
+        return False
+    return any(
+        isinstance(event, dict) and event.get("type") in {"DealStarted", "DealEnded", "MatchEnded"}
+        for event in events
+    )
 
 
 def _apply_score_events(memory: JsonObject, events: list[JsonObject]) -> None:

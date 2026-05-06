@@ -13,6 +13,7 @@ class SimpleBotPolicyTests(unittest.TestCase):
     def test_leads_first_card_when_turn(self) -> None:
         public = PublicTableSnapshot(
             table_id="table-1",
+            deal_id=1,
             phase=MatchPhase.PLAYING,
             seats={},
             hand_counts={Seat.EAST: 1},
