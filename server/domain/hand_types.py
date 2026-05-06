@@ -99,10 +99,10 @@ def _parse_with_wildcards(cards: tuple[Card, ...], card_ids: tuple[str, ...], le
             assignments.append((wild.id, suit, rank))
         candidates.extend(_parse_candidates(tuple(expanded), card_ids, wild_assignments=tuple(assignments)))
 
-    deduped: dict[tuple[HandType, Rank, int, tuple[tuple[str, Suit, Rank], ...]], PlayedHand] = {}
+    deduped: dict[tuple[HandType, Rank, int], PlayedHand] = {}
     for candidate in candidates:
-        key = (candidate.type, candidate.primary_rank, candidate.length, candidate.wild_assignments)
-        deduped[key] = candidate
+        key = (candidate.type, candidate.primary_rank, candidate.length)
+        deduped.setdefault(key, candidate)
     return list(deduped.values())
 
 

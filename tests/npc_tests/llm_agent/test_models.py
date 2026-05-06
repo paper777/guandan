@@ -98,10 +98,10 @@ class ModelAdapterTests(unittest.TestCase):
         action = provider.choose_action({"prompt": {"kind": "play_or_pass"}, "snapshot": {"hand": []}})
 
         self.assertEqual(action["type"], "pass")
-        self.assertIn("Guandan NPC player", model.requests[0].system_prompt)
-        self.assertIn("skills", model.requests[0].user_prompt)
+        self.assertIn("Guandan MASTER level player", model.requests[0].system_prompt)
         self.assertIn("strategy_context", model.requests[0].user_prompt)
-        self.assertIn("card_player", model.requests[0].user_prompt)
+        self.assertNotIn("card_player", model.requests[0].user_prompt)
+        self.assertNotIn('"skills"', model.requests[0].user_prompt)
         self.assertEqual(model.requests[0].model, "model-a")
 
     def test_provider_factory_allows_codex_cli_without_api_key(self) -> None:

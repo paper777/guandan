@@ -52,7 +52,7 @@ DEFAULT_PLAYER_PROFILES = (
     DefaultPlayerProfile("W", "River", "llm", "balanced"),
     DefaultPlayerProfile("N", "Atlas", "llm", "defensive"),
 )
-DEFAULT_PLAYER_CONFIG_PATH = Path("npc/llm_agent/data/default_players.json")
+DEFAULT_PLAYER_CONFIG_PATH = Path("data/default_players.json")
 
 
 class NpcBroker:
@@ -71,7 +71,7 @@ class NpcBroker:
         seats: tuple[str, ...] | list[str] | None = None,
         *,
         lineup: str = "mixed",
-        storage_dir: str | Path = Path("npc/llm_agent/data"),
+        storage_dir: str | Path = Path("data"),
         config_path: str | Path | None = None,
     ) -> list[BrokerSeat]:
         selected = tuple(seats or SEATS)

@@ -46,7 +46,7 @@ The current level changes rank strength. Treat current_level in the prompt or pu
 - A remaining hand count of 10 or fewer is public endgame pressure because the server automatically reports it.
 
 ## Basic guidance
-Use the supplied table_context, strategy_context, personality, card_player, and skills fields before choosing an action. The personality field describes your risk tolerance, tempo bias, bomb usage, passing bias, and structure bias. Let personality influence choices among legal candidates, but never use it to justify an illegal action or hidden-card assumption. The card_player field contains deterministic candidate actions and a recommended baseline policy; prefer one of those actions unless personality and strategy_context give a clear strategic reason to choose another valid action. The skills field contains reusable tactics and tools available to this NPC; apply them only when their inputs are actually present.
+Use the supplied table_context, strategy_context, personality, memory, and recent_actions fields before choosing an action. The personality field describes your risk tolerance, tempo bias, bomb usage, passing bias, and structure bias. Let personality influence choices among legal actions, but never use it to justify an illegal action or hidden-card assumption. The strategy_context field contains objective hand features and public pressure signals; infer your role, candidate actions, and recommended action from those facts and the current prompt.
 
 Strategy guidance from the project research report:
 - First decide your role: primary attacker, support/guard, or partner-finisher support. Reconsider your role every 3 turns.
@@ -75,7 +75,7 @@ Return exactly one JSON object. Do not wrap it in Markdown. Valid actions:
 - {"type":"submit_tribute","card_id":"..."}
 - {"type":"return_tribute","card_id":"..."}
 
-Only choose card IDs that are present in your hand. Include concise "thinking" and optional "memory_updates" with "skills" or "play_style" when useful."""
+Only choose card IDs that are present in your hand. You may include concise "thinking", inferred "role", "candidates", "recommended_action", and optional "memory_updates" with "skills" or "play_style" when useful. These diagnostic fields must be authored by you, not copied from a deterministic helper."""
 
 
 def build_user_prompt(context: JsonObject) -> str:
@@ -92,8 +92,6 @@ def prompt_context(provider_prompt: JsonObject) -> JsonObject:
         "table_context": provider_prompt.get("table_context", {}),
         "strategy_context": provider_prompt.get("strategy_context", {}),
         "personality": provider_prompt.get("personality", {}),
-        "card_player": provider_prompt.get("card_player", {}),
-        "skills": provider_prompt.get("skills", []),
         "memory": provider_prompt.get("memory", {}),
         "recent_actions": provider_prompt.get("recent_actions", []),
         "model": provider_prompt.get("model", {}),

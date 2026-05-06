@@ -9,7 +9,7 @@ from npc.llm_agent import LlmAgentPlayer
 
 
 class StrategyContextTests(unittest.TestCase):
-    def test_strong_hand_is_primary_attacker(self) -> None:
+    def test_strong_hand_exposes_objective_features_without_role(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             provider = CapturingProvider()
             player = LlmAgentPlayer(LlmAgentConfig(storage_dir=tmp, seat="S"), provider=provider)
@@ -26,10 +26,10 @@ class StrategyContextTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(provider.prompts[0]["strategy_context"]["role_estimate"], "primary_attacker")
+            self.assertNotIn("role_estimate", provider.prompts[0]["strategy_context"])
             self.assertEqual(provider.prompts[0]["strategy_context"]["hand_features"]["control_card_count"], 4)
 
-    def test_partner_near_finish_prioritizes_support(self) -> None:
+    def test_partner_near_finish_exposes_pressure_without_role(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             provider = CapturingProvider()
             player = LlmAgentPlayer(LlmAgentConfig(storage_dir=tmp, seat="S"), provider=provider)
@@ -47,7 +47,7 @@ class StrategyContextTests(unittest.TestCase):
             )
 
             strategy = provider.prompts[0]["strategy_context"]
-            self.assertEqual(strategy["role_estimate"], "support_partner_finish")
+            self.assertNotIn("role_estimate", strategy)
             self.assertTrue(strategy["pressure"]["partner_near_finish"])
 
 

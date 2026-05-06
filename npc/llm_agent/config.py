@@ -12,7 +12,7 @@ class LlmAgentConfig:
     player_id: str | None = None
     seat: str | None = None
     personality: str = "balanced"
-    storage_dir: str | Path = Path("npc/llm_agent/data")
+    storage_dir: str | Path = Path("data")
     memory_path: str | Path | None = None
     action_log_path: str | Path | None = None
     provider_name: str = "deterministic"

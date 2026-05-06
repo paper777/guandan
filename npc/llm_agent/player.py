@@ -7,7 +7,6 @@ from client.api import ActionRequest, JsonObject
 from npc.common.player import Player
 from npc.dummy_bot.policy import DummyBotPolicy
 from npc.llm_agent.actions import validate_action
-from npc.llm_agent.advisor import ActionAdvisor
 from npc.llm_agent.config import LlmAgentConfig
 from npc.llm_agent.context import (
     AgentRequestContext,
@@ -20,14 +19,13 @@ from npc.llm_agent.context import (
 from npc.llm_agent.personality import personality_context
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 from npc.llm_agent.provider import LlmActionProvider, provider_from_config
-from npc.llm_agent.skills import LLM_AGENT_SKILLS
 from npc.llm_agent.strategy import build_strategy_context
 from npc.llm_agent.storage import JsonActionLog, JsonMemoryStore
 
 
 @dataclass(frozen=True, slots=True)
 class DecisionContext:
-    """Prepared inputs shared by model prompting, advisor fallback, and logging."""
+    """Prepared inputs shared by model prompting, fallback, and logging."""
 
     request: ActionRequest
     request_context: AgentRequestContext
@@ -35,7 +33,6 @@ class DecisionContext:
     action_log: JsonActionLog
     memory: JsonObject
     provider_prompt: JsonObject
-    advisor_action: JsonObject
 
 
 class LlmAgentPlayer(Player):
@@ -44,20 +41,17 @@ class LlmAgentPlayer(Player):
     def __init__(self, config: LlmAgentConfig | None = None, provider: LlmActionProvider | None = None) -> None:
         self.config = config or LlmAgentConfig()
         self.provider = provider or provider_from_config(self.config)
-        self._advisor = ActionAdvisor()
         self._fallback = DummyBotPolicy()
         self._stores_by_seat: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
 
     def choose_action(self, request: ActionRequest) -> JsonObject:
         context = self._prepare_decision(request)
         provider_action = self._request_provider(context.provider_prompt)
-        action, provider_action, fallback_used = self._select_action(provider_action, context)
+        action, fallback_used = self._select_action(provider_action, context)
 
-        thinking = str(provider_action.get("thinking") or "Selected a legal conservative action.")
-        action_with_thinking = {**action, "thinking": thinking}
-        self._record_decision(context, action, thinking, fallback_used)
+        self._record_decision(context, action, provider_action, fallback_used)
         self._update_memory(context.memory_store, context.memory, provider_action, request=request)
-        return action_with_thinking
+        return action
 
     def _prepare_decision(self, request: ActionRequest) -> DecisionContext:
         request_context = AgentRequestContext.from_request(request)
@@ -65,15 +59,12 @@ class LlmAgentPlayer(Player):
         memory = memory_store.load()
         personality = personality_context(self.config.personality)
         strategy_context = build_strategy_context(request_context)
-        strategy_context["personality"] = personality
-        advisor_advice = self._advisor.build_advice(request_context, strategy_context)
         provider_prompt = self._build_provider_prompt(
             request,
             memory,
             action_log,
             table_context=request_context.table_context,
             strategy_context=strategy_context,
-            card_player=advisor_advice.to_json(),
             personality=personality,
         )
         return DecisionContext(
@@ -83,50 +74,47 @@ class LlmAgentPlayer(Player):
             action_log=action_log,
             memory=memory,
             provider_prompt=provider_prompt,
-            advisor_action=advisor_advice.recommended_action,
         )
 
-    def _select_action(self, provider_action: JsonObject, context: DecisionContext) -> tuple[JsonObject, JsonObject, bool]:
+    def _select_action(self, provider_action: JsonObject, context: DecisionContext) -> tuple[JsonObject, bool]:
         model_action = validate_action(provider_action, context.request_context)
         if model_action is not None:
-            return model_action, provider_action, False
+            return model_action, False
 
-        fallback_action = validate_action(context.advisor_action, context.request_context)
-        fallback_source = "advisor"
-        if fallback_action is None:
-            fallback_action = self._fallback.choose_action(context.request)
-            fallback_source = "dummy bot"
-        fallback_provider_action = {
-            **fallback_action,
-            "thinking": f"Provider output was invalid for the current prompt, so {fallback_source} fallback was used.",
-        }
-        return fallback_action, fallback_provider_action, True
+        fallback_action = self._fallback.choose_action(context.request)
+        normalized_fallback = validate_action(fallback_action, context.request_context)
+        if normalized_fallback is not None:
+            fallback_action = normalized_fallback
+        return fallback_action, True
 
     def _record_decision(
         self,
         context: DecisionContext,
         action: JsonObject,
-        thinking: str,
+        provider_action: JsonObject,
         fallback_used: bool,
     ) -> None:
         request = context.request
         seat = context.request_context.seat
-        context.action_log.append(
-            {
-                "kind": "decision",
-                "request_id": request.request_id,
-                "table_id": snapshot_value(request, "table_id"),
-                "seat": seat,
-                "event_seq": public_value(request, "event_seq"),
-                "phase": public_value(request, "phase"),
-                "current_level": request.prompt.get("current_level") or public_value(request, "current_level"),
-                "legal_action": request.prompt.get("kind"),
-                "snapshot": safe_snapshot(request.snapshot),
-                "selected_action": action,
-                "thinking": thinking,
-                "fallback_used": fallback_used,
-            }
-        )
+        entry = {
+            "kind": "decision",
+            "request_id": request.request_id,
+            "table_id": snapshot_value(request, "table_id"),
+            "seat": seat,
+            "event_seq": public_value(request, "event_seq"),
+            "phase": public_value(request, "phase"),
+            "current_level": request.prompt.get("current_level") or public_value(request, "current_level"),
+            "legal_action": request.prompt.get("kind"),
+            "snapshot": safe_snapshot(request.snapshot),
+            "selected_action": action,
+            "fallback_used": fallback_used,
+        }
+        llm_output = _llm_output_for_log(provider_action)
+        if llm_output:
+            entry["llm_output"] = llm_output
+        if fallback_used:
+            entry["fallback_reason"] = "provider output was invalid for the current prompt"
+        context.action_log.append(entry)
 
     def observe_action(self, observation: JsonObject) -> None:
         """Record an action submitted by any broker-controlled player."""
@@ -178,7 +166,6 @@ class LlmAgentPlayer(Player):
         *,
         table_context: JsonObject,
         strategy_context: JsonObject,
-        card_player: JsonObject,
         personality: JsonObject,
     ) -> JsonObject:
         return {
@@ -188,8 +175,6 @@ class LlmAgentPlayer(Player):
             "table_context": table_context,
             "strategy_context": strategy_context,
             "personality": personality,
-            "card_player": card_player,
-            "skills": [dict(skill) for skill in LLM_AGENT_SKILLS],
             "memory": memory,
             "recent_actions": action_log.recent(self.config.max_recent_actions),
             "system_prompt": SYSTEM_PROMPT,
@@ -242,6 +227,26 @@ def _merge_skills(existing: object, incoming: list[object], *, limit: int = 30) 
         if text and text not in merged:
             merged.append(text)
     return merged[-limit:]
+
+
+def _llm_output_for_log(provider_action: JsonObject) -> JsonObject:
+    output: JsonObject = {}
+    thinking = provider_action.get("thinking")
+    if isinstance(thinking, str) and thinking.strip():
+        output["thinking"] = thinking.strip()
+    role = provider_action.get("role")
+    if isinstance(role, str) and role.strip():
+        output["role"] = role.strip()
+    candidates = provider_action.get("candidates")
+    if isinstance(candidates, list):
+        output["candidates"] = candidates
+    recommended_action = provider_action.get("recommended_action")
+    if isinstance(recommended_action, dict):
+        output["recommended_action"] = recommended_action
+    message = provider_action.get("message")
+    if provider_action.get("type") == "error" and isinstance(message, str) and message.strip():
+        output["provider_error"] = message.strip()
+    return output
 
 
 def _apply_score_events(memory: JsonObject, events: list[JsonObject]) -> None:

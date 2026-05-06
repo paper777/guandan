@@ -8,9 +8,8 @@ from pathlib import Path
 from client.api import ActionRequest
 from npc.broker.broker import NpcBroker
 from npc.common.player import Player
-from npc.llm_agent import ActionAdvisor, LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
+from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
 from npc.llm_agent.prompts import SYSTEM_PROMPT
-from npc.llm_agent.skills import CARD_RECORDER_SKILL
 
 
 class InvalidProvider:
@@ -86,41 +85,53 @@ class LlmAgentPolicyTests(unittest.TestCase):
     def test_policy_alias_points_to_player_class(self) -> None:
         self.assertIs(LlmAgentPolicy, LlmAgentPlayer)
         self.assertIsInstance(LlmAgentPolicy(), Player)
-        self.assertIsInstance(ActionAdvisor(), ActionAdvisor)
 
     def test_provider_prompt_includes_central_system_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"], "thinking": "Lead low."})
+            provider = StaticProvider(
+                {
+                    "type": "play_cards",
+                    "card_ids": ["D1-S-3"],
+                    "thinking": "Lead low.",
+                    "role": "primary_attacker",
+                    "candidates": [{"type": "play_cards", "card_ids": ["D1-S-3"]}],
+                    "recommended_action": {"type": "play_cards", "card_ids": ["D1-S-3"]},
+                }
+            )
             policy = LlmAgentPlayer(
                 LlmAgentConfig(storage_dir=tmp, seat="S", personality="aggressive"),
                 provider=provider,
             )
 
-            policy.choose_action(_lead_request("S"))
+            action = policy.choose_action(_lead_request("S"))
 
+            self.assertEqual(action, {"type": "play_cards", "card_ids": ["D1-S-3"]})
             self.assertEqual(provider.prompts[-1]["system_prompt"], SYSTEM_PROMPT)
             self.assertIn("Tribute giver", provider.prompts[-1]["system_prompt"])
-            self.assertIn("Never assume hidden cards", provider.prompts[-1]["system_prompt"])
             self.assertEqual(provider.prompts[-1]["table_context"]["partner"], "N")
             self.assertEqual(provider.prompts[-1]["table_context"]["opponents"], ["E", "W"])
-            self.assertEqual(provider.prompts[-1]["strategy_context"]["role_estimate"], "balanced")
+            self.assertNotIn("role_estimate", provider.prompts[-1]["strategy_context"])
+            self.assertEqual(provider.prompts[-1]["strategy_context"]["hand_features"]["card_count"], 1)
             self.assertEqual(provider.prompts[-1]["personality"]["type"], "aggressive")
-            self.assertEqual(provider.prompts[-1]["strategy_context"]["personality"]["type"], "aggressive")
             self.assertEqual(provider.prompts[-1]["personality"]["risk_tolerance"], "high")
-            self.assertEqual(
-                provider.prompts[-1]["card_player"]["recommended_action"],
-                {"type": "play_cards", "card_ids": ["D1-S-3"]},
-            )
+            self.assertNotIn("card_player", provider.prompts[-1])
+            self.assertNotIn("skills", provider.prompts[-1])
             self.assertIn("Bombs are tempo tools", provider.prompts[-1]["system_prompt"])
             self.assertIn("Rank strength is level-dependent", provider.prompts[-1]["system_prompt"])
             self.assertIn("Legal hand shapes are", provider.prompts[-1]["system_prompt"])
             self.assertIn("Bomb hierarchy", provider.prompts[-1]["system_prompt"])
             self.assertIn("A trick ends after three consecutive passes", provider.prompts[-1]["system_prompt"])
             self.assertIn("During tribute, submit the highest eligible card", provider.prompts[-1]["system_prompt"])
-            self.assertIn("card_player", provider.prompts[-1]["system_prompt"])
-            self.assertIn(CARD_RECORDER_SKILL, provider.prompts[-1]["skills"])
+            self.assertIn('inferred "role"', provider.prompts[-1]["system_prompt"])
+            decision = _read_json(Path(tmp) / "S" / "actions.json")[0]
+            self.assertEqual(decision["llm_output"]["thinking"], "Lead low.")
+            self.assertEqual(decision["llm_output"]["role"], "primary_attacker")
+            self.assertEqual(
+                decision["llm_output"]["recommended_action"],
+                {"type": "play_cards", "card_ids": ["D1-S-3"]},
+            )
 
-    def test_play_or_pass_prompt_includes_beating_card_player_candidate(self) -> None:
+    def test_play_or_pass_prompt_omits_deterministic_card_player_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-4"], "thinking": "Beat cheaply."})
             policy = LlmAgentPlayer(LlmAgentConfig(storage_dir=tmp, seat="S"), provider=provider)
@@ -147,9 +158,10 @@ class LlmAgentPolicyTests(unittest.TestCase):
 
             self.assertEqual(action["type"], "play_cards")
             self.assertEqual(action["card_ids"], ["D1-S-4"])
+            self.assertNotIn("card_player", provider.prompts[-1])
             self.assertEqual(
-                provider.prompts[-1]["card_player"]["recommended_action"],
-                {"type": "play_cards", "card_ids": ["D1-S-4"], "declared_type": "single"},
+                provider.prompts[-1]["prompt"]["current_trick"],
+                {"card_ids": ["D1-S-3"], "hand_type": "single", "last_play_seat": "E"},
             )
 
     def test_explicit_player_storage_paths_are_used(self) -> None:
@@ -188,7 +200,7 @@ class LlmAgentPolicyTests(unittest.TestCase):
                 self.assertEqual(action_path, Path(tmp) / seat / "actions.json")
                 self.assertEqual(_read_json(memory_path)["seat"], seat)
 
-    def test_invalid_provider_action_falls_back_and_records_thinking(self) -> None:
+    def test_invalid_provider_action_falls_back_and_logs_llm_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             action_path = Path(tmp) / "actions.json"
             policy = LlmAgentPolicy(
@@ -200,10 +212,14 @@ class LlmAgentPolicyTests(unittest.TestCase):
 
             self.assertEqual(action["type"], "play_cards")
             self.assertEqual(action["card_ids"], ["D1-S-3"])
-            self.assertIn("thinking", action)
+            self.assertNotIn("thinking", action)
             entries = _read_json(action_path)
             self.assertTrue(entries[0]["fallback_used"])
-            self.assertIn("advisor fallback", entries[0]["thinking"])
+            self.assertEqual(entries[0]["fallback_reason"], "provider output was invalid for the current prompt")
+            self.assertEqual(
+                entries[0]["llm_output"]["thinking"],
+                "This intentionally chooses a card that is not in hand.",
+            )
 
     def test_provider_prompt_uses_only_that_player_recent_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
