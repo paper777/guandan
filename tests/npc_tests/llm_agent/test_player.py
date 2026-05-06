@@ -31,6 +31,29 @@ class StaticProvider:
         return dict(self.action)
 
 
+class StaticMemoryAgent:
+    def __init__(self):
+        self.calls = []
+
+    def process_deal(self, memory, *, recent_actions, events, players_by_seat, observer_name):
+        self.calls.append(
+            {
+                "recent_actions": recent_actions,
+                "events": events,
+                "players_by_seat": players_by_seat,
+                "observer_name": observer_name,
+            }
+        )
+        memory["techniques"]["level1"].append(
+            {"summary": "Partner delivery worked.", "techniques": ["Lead low to transfer tempo."]}
+        )
+        memory["player_profiles"][players_by_seat["S"]] = {
+            "latest_seat": "S",
+            "personality": "aggressive",
+            "playing_style": "sprints when close",
+        }
+
+
 class FakeClient:
     def __init__(self):
         self.calls = []
@@ -270,8 +293,53 @@ class LlmAgentPolicyTests(unittest.TestCase):
             south.choose_action(_lead_request("S"))
 
             self.assertEqual(south_provider.prompts[-1]["recent_actions"][0]["seat"], "S")
-            self.assertNotIn("West skill", _read_json(Path(tmp) / "South-Agent" / "memory.json")["skills"])
-            self.assertNotIn("South skill", _read_json(Path(tmp) / "West-Agent" / "memory.json")["skills"])
+            south_memory = json.dumps(_read_json(Path(tmp) / "South-Agent" / "memory.json"))
+            west_memory = json.dumps(_read_json(Path(tmp) / "West-Agent" / "memory.json"))
+            self.assertNotIn("West skill", south_memory)
+            self.assertNotIn("South skill", west_memory)
+
+    def test_deal_end_updates_techniques_and_name_keyed_player_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_agent = StaticMemoryAgent()
+            policy = LlmAgentPolicy(
+                LlmAgentConfig(storage_dir=tmp, player_name="Jade", seat="S"),
+                memory_agent=memory_agent,
+            )
+
+            policy.observe_action(
+                {
+                    "table_id": "table-1",
+                    "observer_seat": "S",
+                    "observer_name": "Jade",
+                    "actor_seat": "S",
+                    "actor_name": "Jade",
+                    "players_by_seat": {"E": "Ming", "S": "Jade", "W": "River", "N": "Atlas"},
+                    "action": {"type": "play_cards", "card_ids": ["D1-S-3"]},
+                    "event_seq": 12,
+                    "events": [
+                        {"seq": 10, "type": "CardsPlayed", "payload": {"seat": "S", "card_ids": ["D1-S-3"]}},
+                        {
+                            "seq": 11,
+                            "type": "DealEnded",
+                            "payload": {"finish_order": ["S", "N", "E", "W"], "winning_team": "SN"},
+                        },
+                        {
+                            "seq": 12,
+                            "type": "LevelAdvanced",
+                            "payload": {"team": "SN", "next_level": "5"},
+                        },
+                    ],
+                }
+            )
+
+            memory = _read_json(Path(tmp) / "Jade" / "memory.json")
+            self.assertEqual(memory_agent.calls[0]["observer_name"], "Jade")
+            self.assertEqual(memory_agent.calls[0]["players_by_seat"]["S"], "Jade")
+            self.assertEqual(memory["techniques"]["level1"][0]["summary"], "Partner delivery worked.")
+            self.assertIn("Jade", memory["player_profiles"])
+            self.assertEqual(memory["player_profiles"]["Jade"]["latest_seat"], "S")
+            self.assertEqual(memory["score"]["deals_played"], 1)
+            self.assertEqual(memory["score"]["wins"], 1)
 
     def test_broker_notifies_all_llm_agents_after_each_submitted_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

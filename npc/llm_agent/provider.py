@@ -68,6 +68,25 @@ class ModelBackedLlmProvider:
         )
         return parse_json_object(response.content)
 
+    def complete_memory(
+        self,
+        *,
+        system_prompt: str,
+        context: JsonObject,
+        max_output_tokens: int | None = None,
+    ) -> JsonObject:
+        response = self.model_client.complete(
+            ModelRequest(
+                system_prompt=system_prompt,
+                user_prompt=build_user_prompt(context),
+                model=self.model_name,
+                temperature=self.temperature,
+                timeout_seconds=self.timeout_seconds,
+                max_output_tokens=max_output_tokens or self.max_output_tokens,
+            )
+        )
+        return parse_json_object(response.content)
+
 
 def provider_from_config(config: object) -> LlmActionProvider:
     provider_name = str(getattr(config, "provider_name", "deterministic")).lower()

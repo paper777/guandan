@@ -16,6 +16,7 @@ from npc.llm_agent.context import (
     snapshot_value,
     team_for_seat,
 )
+from npc.llm_agent.memory import MemoryAgent, append_technique_updates
 from npc.llm_agent.personality import personality_context
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 from npc.llm_agent.provider import LlmActionProvider, provider_from_config
@@ -38,9 +39,19 @@ class DecisionContext:
 class LlmAgentPlayer(Player):
     """Broker-compatible LLM NPC player with isolated filesystem memory."""
 
-    def __init__(self, config: LlmAgentConfig | None = None, provider: LlmActionProvider | None = None) -> None:
+    def __init__(
+        self,
+        config: LlmAgentConfig | None = None,
+        provider: LlmActionProvider | None = None,
+        memory_agent: MemoryAgent | None = None,
+    ) -> None:
         self.config = config or LlmAgentConfig()
         self.provider = provider or provider_from_config(self.config)
+        self.memory_agent = memory_agent or MemoryAgent(
+            self.provider,
+            compaction_char_limit=self.config.memory_compaction_char_limit,
+            max_output_tokens=self.config.memory_max_output_tokens,
+        )
         self._fallback = DummyBotPolicy()
         self._stores_by_namespace: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
 
@@ -50,7 +61,13 @@ class LlmAgentPlayer(Player):
         action, fallback_used = self._select_action(provider_action, context)
 
         self._record_decision(context, action, provider_action, fallback_used)
-        self._update_memory(context.memory_store, context.memory, provider_action, request=request)
+        self._update_memory(
+            context.memory_store,
+            context.memory,
+            provider_action,
+            request=request,
+            action_log=context.action_log,
+        )
         return action
 
     def _prepare_decision(self, request: ActionRequest) -> DecisionContext:
@@ -109,6 +126,9 @@ class LlmAgentPlayer(Player):
             "selected_action": action,
             "fallback_used": fallback_used,
         }
+        players_by_seat = _players_by_seat_from_request(request)
+        if players_by_seat:
+            entry["players_by_seat"] = players_by_seat
         llm_output = _llm_output_for_log(provider_action)
         if llm_output:
             entry["llm_output"] = llm_output
@@ -124,18 +144,30 @@ class LlmAgentPlayer(Player):
         memory = memory_store.load()
         if observer_seat:
             memory["seat"] = observer_seat
+        observer_name = str(observation.get("observer_name") or self.config.display_name_for(observer_seat or None))
         action_log.append(
             {
                 "kind": "observed_action",
                 "table_id": observation.get("table_id"),
                 "observer_seat": observer_seat or None,
+                "observer_name": observer_name,
                 "actor_seat": observation.get("actor_seat"),
+                "actor_name": observation.get("actor_name"),
+                "players_by_seat": _players_by_seat_from_observation(observation),
                 "action": observation.get("action"),
                 "response_events": observation.get("events", []),
                 "event_seq": observation.get("event_seq"),
             }
         )
-        self._update_memory(memory_store, memory, {}, events=_events_from_observation(observation))
+        self._update_memory(
+            memory_store,
+            memory,
+            {},
+            events=_events_from_observation(observation),
+            action_log=action_log,
+            players_by_seat=_players_by_seat_from_observation(observation),
+            observer_name=observer_name,
+        )
 
     @property
     def storage_paths(self) -> dict[str, tuple[Path, Path]]:
@@ -178,6 +210,7 @@ class LlmAgentPlayer(Player):
             "strategy_context": strategy_context,
             "personality": personality,
             "memory": memory,
+            "players_by_seat": _players_by_seat_from_request(request),
             "recent_actions": action_log.recent(self.config.max_recent_actions),
             "system_prompt": SYSTEM_PROMPT,
             "model": {
@@ -203,34 +236,35 @@ class LlmAgentPlayer(Player):
         *,
         request: ActionRequest | None = None,
         events: list[JsonObject] | None = None,
+        action_log: JsonActionLog | None = None,
+        players_by_seat: JsonObject | None = None,
+        observer_name: str | None = None,
     ) -> None:
         updates = provider_action.get("memory_updates")
         if isinstance(updates, dict):
             play_style = updates.get("play_style")
             if isinstance(play_style, str) and play_style.strip():
                 memory["play_style"] = play_style.strip()
-            skills = updates.get("skills")
-            if isinstance(skills, list):
-                memory["skills"] = _merge_skills(memory.get("skills"), skills)
+            techniques = updates.get("techniques")
+            if not isinstance(techniques, list):
+                techniques = updates.get("skills")
+            append_technique_updates(memory, techniques)
         if request is not None:
             seat = seat_from_request(request)
             memory["player_name"] = self.config.display_name_for(seat)
             memory["seat"] = seat
+            players_by_seat = _players_by_seat_from_request(request)
+            observer_name = self.config.display_name_for(seat)
         _apply_score_events(memory, events or [])
+        if events and action_log is not None:
+            self.memory_agent.process_deal(
+                memory,
+                recent_actions=action_log.recent(self.config.memory_recent_deal_scan_limit),
+                events=events,
+                players_by_seat=players_by_seat or {},
+                observer_name=observer_name or str(memory.get("player_name") or self.config.display_name_for(None)),
+            )
         memory_store.save(memory)
-
-
-def _merge_skills(existing: object, incoming: list[object], *, limit: int = 30) -> list[str]:
-    merged: list[str] = []
-    for item in existing if isinstance(existing, list) else []:
-        text = str(item).strip()
-        if text and text not in merged:
-            merged.append(text)
-    for item in incoming:
-        text = str(item).strip()
-        if text and text not in merged:
-            merged.append(text)
-    return merged[-limit:]
 
 
 def _llm_output_for_log(provider_action: JsonObject) -> JsonObject:
@@ -286,6 +320,25 @@ def _events_from_observation(observation: JsonObject) -> list[JsonObject]:
     if not isinstance(events, list):
         return []
     return [event for event in events if isinstance(event, dict)]
+
+
+def _players_by_seat_from_request(request: ActionRequest) -> JsonObject:
+    snapshot_players = request.snapshot.get("players_by_seat")
+    if isinstance(snapshot_players, dict):
+        return _string_dict(snapshot_players)
+    public = request.snapshot.get("public")
+    if isinstance(public, dict) and isinstance(public.get("players_by_seat"), dict):
+        return _string_dict(public["players_by_seat"])
+    return {}
+
+
+def _players_by_seat_from_observation(observation: JsonObject) -> JsonObject:
+    players = observation.get("players_by_seat")
+    return _string_dict(players) if isinstance(players, dict) else {}
+
+
+def _string_dict(value: dict[object, object]) -> JsonObject:
+    return {str(key): str(item) for key, item in value.items() if str(key).strip() and str(item).strip()}
 
 
 LlmAgentPolicy = LlmAgentPlayer

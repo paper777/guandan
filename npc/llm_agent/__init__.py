@@ -10,6 +10,7 @@ from npc.llm_agent.models import (
     ModelResponse,
     OpenAIResponsesModelClient,
 )
+from npc.llm_agent.memory import MemoryAgent
 from npc.llm_agent.personality import PERSONALITY_FACTORS, normalize_personality, personality_context
 from npc.llm_agent.player import LlmAgentPlayer, LlmAgentPolicy
 from npc.llm_agent.provider import DeterministicLlmProvider, LlmActionProvider, ModelBackedLlmProvider
@@ -23,6 +24,7 @@ __all__ = [
     "LlmActionProvider",
     "LlmAgentConfig",
     "LlmAgentPolicy",
+    "MemoryAgent",
     "ModelBackedLlmProvider",
     "ModelClient",
     "ModelRequest",

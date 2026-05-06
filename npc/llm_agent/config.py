@@ -25,6 +25,9 @@ class LlmAgentConfig:
     temperature: float = 0.2
     max_output_tokens: int = 800
     max_recent_actions: int = 20
+    memory_compaction_char_limit: int = 16000
+    memory_recent_deal_scan_limit: int = 200
+    memory_max_output_tokens: int = 1200
 
     def namespace_for(self, seat: str | None = None) -> str:
         raw = self.player_name or self.player_id or self.seat or seat or "llm-agent"

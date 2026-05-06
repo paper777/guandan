@@ -11,6 +11,7 @@ from npc.llm_agent.models import (
 )
 from npc.llm_agent.provider import ModelBackedLlmProvider, provider_from_config
 from npc.llm_agent.config import LlmAgentConfig
+from npc.llm_agent.prompts import MEMORY_TECHNIQUE_SUMMARY_PROMPT
 
 
 class CapturingTransport:
@@ -103,6 +104,30 @@ class ModelAdapterTests(unittest.TestCase):
         self.assertNotIn("card_player", model.requests[0].user_prompt)
         self.assertNotIn('"skills"', model.requests[0].user_prompt)
         self.assertEqual(model.requests[0].model, "model-a")
+
+    def test_model_backed_provider_runs_memory_prompt_with_same_model(self) -> None:
+        class FakeModel:
+            def __init__(self):
+                self.requests = []
+
+            def complete(self, request):
+                self.requests.append(request)
+                return type("Response", (), {"content": '{"summary":"Learned.","techniques":["Keep tempo."]}'})()
+
+        model = FakeModel()
+        provider = ModelBackedLlmProvider(model, model_name="model-a", max_output_tokens=800)
+
+        result = provider.complete_memory(
+            system_prompt=MEMORY_TECHNIQUE_SUMMARY_PROMPT,
+            context={"deal_events": []},
+            max_output_tokens=1200,
+        )
+
+        self.assertEqual(result["summary"], "Learned.")
+        self.assertEqual(model.requests[0].system_prompt, MEMORY_TECHNIQUE_SUMMARY_PROMPT)
+        self.assertIn("deal_events", model.requests[0].user_prompt)
+        self.assertEqual(model.requests[0].model, "model-a")
+        self.assertEqual(model.requests[0].max_output_tokens, 1200)
 
     def test_provider_factory_allows_codex_cli_without_api_key(self) -> None:
         provider = provider_from_config(

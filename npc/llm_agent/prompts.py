@@ -75,7 +75,56 @@ Return exactly one JSON object. Do not wrap it in Markdown. Valid actions:
 - {"type":"submit_tribute","card_id":"..."}
 - {"type":"return_tribute","card_id":"..."}
 
-Only choose card IDs that are present in your hand. You may include concise "thinking", inferred "role", "candidates", "recommended_action", and optional "memory_updates" with "skills" or "play_style" when useful. These diagnostic fields must be authored by you, not copied from a deterministic helper."""
+Only choose card IDs that are present in your hand. You may include concise "thinking", inferred "role", "candidates", "recommended_action", and optional "memory_updates" with "techniques" or "play_style" when useful. These diagnostic fields must be authored by you, not copied from a deterministic helper."""
+
+
+MEMORY_RULE_CONTEXT = """Guandan rule context for memory tasks:
+- Four seats form partnerships: E with W, and S with N. Good play balances finishing yourself with delivering tempo to your partner.
+- The game uses two decks; card IDs are physical cards. Rank strength depends on current level: jokers > level rank > A > K ... > 2. Red-heart level cards are wild for non-joker combinations.
+- Legal hand families include singles, pairs, triples, full houses, five-card straights, three-pair runs, two-triple runs, same-rank bombs, straight flushes, and four jokers.
+- Responders must beat the current trick with the same comparable shape/length, or use a bomb-like hand. Passing is legal only when responding.
+- Bomb hierarchy: four jokers beat everything; bombs beat ordinary hands; longer bombs beat shorter bombs; same-length bombs compare by rank; straight flush beats bombs up to length five, while bombs length six or more beat straight flush.
+- A trick ends after three consecutive passes. The last player who played leads next; if that player finished on the unbeaten final play, their active partner borrows the lead.
+- A deal ends when three players finish or one team finishes first and second. Only the first finisher's team upgrades: partner second advances 3 levels, partner third 2, partner last 1.
+- Tribute requires the giver to submit the highest eligible card and never a red-heart level card. Return tribute should be low; when returning to partner it must be rank 10 or lower.
+- A remaining hand count of 10 or fewer is public pressure and should affect endgame memory.
+- Use only public observations and the observer's own hand/decisions. Do not record inferred hidden cards as facts."""
+
+
+MEMORY_TECHNIQUE_SUMMARY_PROMPT = """You are a Guandan memory sub-agent.
+
+Summarize the finished deal into reusable techniques for future decisions. Use only public observations and the observer's own recorded decisions. Do not infer hidden cards as facts.
+
+Return exactly one JSON object:
+{"summary":"one concise deal-level lesson","techniques":["short reusable technique", "..."]}
+
+Focus on concrete table-play techniques: team coordination, bomb timing, offensive formations, defensive formations, when to dismantle combinations, and other durable lessons."""
+
+
+MEMORY_TECHNIQUE_COMPACTION_PROMPT = """You are a Guandan memory compaction sub-agent.
+
+Compact recent level-1 deal technique notes into long-term level-2 technique categories. Deduplicate, preserve the strongest reusable lessons, and keep each item concise.
+
+Return exactly one JSON object with these keys:
+{"team_coordination":[],"bomb_usage":[],"offensive_card_formation":[],"defensive_card_formation":[],"combo_removal":[],"others":[]}
+
+Category intent:
+- team_coordination: avoiding blocking partner, complementarity, letting one opponent go when useful, precise card transmission.
+- bomb_usage: bomb selection, bomb timing, sprinting, protection, interception.
+- offensive_card_formation: proactive structures and leads that reduce turns.
+- defensive_card_formation: responses, blocking, containment, and endgame prevention.
+- combo_removal: when and how to break runs, pairs, triples, full houses, or bombs.
+- others: important lessons that do not fit above."""
+
+
+MEMORY_PLAYER_ANALYSIS_PROMPT = """You are a Guandan player-analysis sub-agent.
+
+Analyze each named player's personality and playing style from the finished deal. Use only public observations and the observer's own recorded decisions. Store players by display name, not seat; seat is only the latest known seat.
+
+Return exactly one JSON object:
+{"players":{"Player Name":{"latest_seat":"S","personality":"balanced","playing_style":"concise style summary","evidence":"brief public evidence","confidence":"low|medium|high"}}}
+
+Prefer conservative confidence when evidence is thin."""
 
 
 def build_user_prompt(context: JsonObject) -> str:
@@ -93,6 +142,7 @@ def prompt_context(provider_prompt: JsonObject) -> JsonObject:
         "strategy_context": provider_prompt.get("strategy_context", {}),
         "personality": provider_prompt.get("personality", {}),
         "memory": provider_prompt.get("memory", {}),
+        "players_by_seat": provider_prompt.get("players_by_seat", {}),
         "recent_actions": provider_prompt.get("recent_actions", []),
         "model": provider_prompt.get("model", {}),
     }

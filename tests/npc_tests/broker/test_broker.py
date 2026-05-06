@@ -90,6 +90,9 @@ class NpcBrokerTests(unittest.TestCase):
                                 "personality": "defensive",
                                 "provider_name": "codex-cli",
                                 "codex_binary": "codex-test",
+                                "memory_compaction_char_limit": 123,
+                                "memory_recent_deal_scan_limit": 45,
+                                "memory_max_output_tokens": 678,
                             },
                         ]
                     }
@@ -113,6 +116,9 @@ class NpcBrokerTests(unittest.TestCase):
         self.assertEqual(broker.seats["W"].policy.config.model_name, "gpt-5.2")
         self.assertEqual(broker.seats["W"].policy.config.timeout_seconds, 120.0)
         self.assertEqual(broker.seats["W"].policy.config.personality, "defensive")
+        self.assertEqual(broker.seats["W"].policy.config.memory_compaction_char_limit, 123)
+        self.assertEqual(broker.seats["W"].policy.config.memory_recent_deal_scan_limit, 45)
+        self.assertEqual(broker.seats["W"].policy.config.memory_max_output_tokens, 678)
 
     def test_join_ready_and_poll_submit_are_owned_by_broker(self) -> None:
         client = FakeClient()
@@ -212,6 +218,35 @@ class NpcBrokerTests(unittest.TestCase):
         broker.poll_once("S")
 
         self.assertEqual(policy.requests[0].prompt["current_trick"]["card_ids"], ["D1-S-3"])
+
+    def test_broker_passes_player_names_to_policy_and_observers(self) -> None:
+        class CapturingPolicy:
+            def __init__(self):
+                self.requests = []
+                self.observations = []
+
+            def choose_action(self, request):
+                self.requests.append(request)
+                return {"type": "play_cards", "card_ids": ["D1-S-3"]}
+
+            def observe_action(self, observation):
+                self.observations.append(observation)
+
+        client = FakeClient()
+        south_policy = CapturingPolicy()
+        west_policy = CapturingPolicy()
+        broker = NpcBroker(client, "table-1")
+        south = broker.add_seat("S", south_policy, "Jade")
+        west = broker.add_seat("W", west_policy, "River")
+        south.controller_id = "c-S"
+        west.controller_id = "c-W"
+
+        broker.poll_once("S")
+
+        self.assertEqual(south_policy.requests[0].snapshot["players_by_seat"], {"S": "Jade", "W": "River"})
+        self.assertEqual(west_policy.observations[0]["actor_name"], "Jade")
+        self.assertEqual(west_policy.observations[0]["observer_name"], "River")
+        self.assertEqual(west_policy.observations[0]["players_by_seat"], {"S": "Jade", "W": "River"})
 
 
 if __name__ == "__main__":

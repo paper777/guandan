@@ -42,6 +42,9 @@ class DefaultPlayerProfile:
     timeout_seconds: float | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
+    memory_compaction_char_limit: int | None = None
+    memory_recent_deal_scan_limit: int | None = None
+    memory_max_output_tokens: int | None = None
     codex_binary: str | None = None
     codex_working_dir: str | Path | None = None
 
@@ -118,6 +121,7 @@ class NpcBroker:
                         "table_id": self.table_id,
                         "seat": broker_seat.seat,
                         "hand": list(snapshot.get("hand", [])),
+                        "players_by_seat": self._players_by_seat(),
                         "public": public,
                     },
                 )
@@ -175,12 +179,18 @@ class NpcBroker:
                 {
                     "table_id": self.table_id,
                     "observer_seat": observer.seat,
+                    "observer_name": observer.display_name,
                     "actor_seat": actor.seat,
+                    "actor_name": actor.display_name,
+                    "players_by_seat": self._players_by_seat(),
                     "action": action,
                     "events": events if isinstance(events, list) else [],
                     "event_seq": event_seq,
                 }
             )
+
+    def _players_by_seat(self) -> JsonObject:
+        return {seat: broker_seat.display_name for seat, broker_seat in self.seats.items()}
 
 
 def main() -> None:
@@ -233,6 +243,15 @@ def _player_for_profile(profile: DefaultPlayerProfile, lineup: str, storage_dir:
             timeout_seconds=profile.timeout_seconds or _default_timeout_for_provider(provider_name),
             temperature=profile.temperature if profile.temperature is not None else 0.2,
             max_output_tokens=profile.max_output_tokens or 800,
+            memory_compaction_char_limit=(
+                profile.memory_compaction_char_limit if profile.memory_compaction_char_limit is not None else 16000
+            ),
+            memory_recent_deal_scan_limit=(
+                profile.memory_recent_deal_scan_limit if profile.memory_recent_deal_scan_limit is not None else 200
+            ),
+            memory_max_output_tokens=(
+                profile.memory_max_output_tokens if profile.memory_max_output_tokens is not None else 1200
+            ),
             codex_binary=profile.codex_binary or "codex",
             codex_working_dir=profile.codex_working_dir,
         )
@@ -275,6 +294,9 @@ def load_default_player_profiles(path: str | Path = DEFAULT_PLAYER_CONFIG_PATH) 
             timeout_seconds=_optional_float(item.get("timeout_seconds")),
             temperature=_optional_float(item.get("temperature")),
             max_output_tokens=_optional_int(item.get("max_output_tokens")),
+            memory_compaction_char_limit=_optional_int(item.get("memory_compaction_char_limit")),
+            memory_recent_deal_scan_limit=_optional_int(item.get("memory_recent_deal_scan_limit")),
+            memory_max_output_tokens=_optional_int(item.get("memory_max_output_tokens")),
             codex_binary=_optional_str(item.get("codex_binary")),
             codex_working_dir=_optional_str(item.get("codex_working_dir")),
         )
