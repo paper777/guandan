@@ -50,6 +50,6 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
 
     public_snapshot = client.table_snapshot(table_id)
     if public_snapshot.get("phase") not in {"PLAYING", "TRIBUTE", "DEAL_COMPLETE", "MATCH_COMPLETE"}:
-        response = client.start(table_id, seed=args.seed)
+        response = client.start(table_id)
         public_snapshot = response.get("snapshot") or client.table_snapshot(table_id)
     return CliSession(table_id, human_seat, human_controller_id, bot_broker, npc_metadata), public_snapshot

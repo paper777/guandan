@@ -44,7 +44,6 @@ from client.cli_app.session import CliSession, prepare_default_table
 from client.cli_app.state_machine import (
     CliMachineState,
     CliStateMachine,
-    deal_seed,
     drive_bot_turns,
     input_deadline_epoch_ms,
     refresh_after_input_timeout,
@@ -91,7 +90,6 @@ __all__ = [
     "read_command",
     "read_stdin_with_deadline",
     "refresh_after_input_timeout",
-    "deal_seed",
     "resolve_card_inputs",
     "resolve_card_label",
     "run_cli",

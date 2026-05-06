@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from server.domain.cards import CARD_BY_ID, Rank, is_red_heart_level_card
-from server.domain.commands import Command, Pass, PlayCards, ReturnTribute, SubmitTribute
+from server.domain.commands import Command, Pass, PlayCards, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.comparator import RankContext
 from server.domain.events import CommandRejected, Event, RejectCode
 from server.domain.reducer import reduce_command
@@ -73,11 +73,13 @@ class TableActor:
         self._active_prompt: ActivePrompt | None = None
         self._timeout_task: asyncio.Task[None] | None = None
         self.last_timeout_result: ActorResult | None = None
+        self._deal_number = 0
         if self.event_store is not None:
             self.event_store.create_match(self.match_id, table_id)
             events = self.event_store.load_events(self.match_id)
             if events:
                 self.state = rebuild_state_from_events(table_id, events)
+                self._deal_number = _count_deals_started(events)
         self._refresh_prompt(schedule_timeout=False, emit_prompt_event=False)
 
     @property
@@ -151,12 +153,14 @@ class TableActor:
                 )
                 return ActorResult(events=events, replayed=True)
 
-        result = reduce_command(self.state, command)
+        effective_command = self._server_command(command)
+        result = reduce_command(self.state, effective_command)
         if result.rejection is not None:
             return ActorResult(events=(), rejection=result.rejection)
 
         self.state = result.state
         events = (*result.events, *self._refresh_prompt(schedule_timeout=schedule_timeout, emit_prompt_event=True))
+        self._deal_number += sum(1 for event in events if event.type == "DealStarted")
         if self.event_store is not None and events:
             self.event_store.append_events(self.match_id, events)
             if controller_id is not None and request_id is not None:
@@ -168,6 +172,11 @@ class TableActor:
                     events[-1].seq,
                 )
         return ActorResult(events=events)
+
+    def _server_command(self, command: Command) -> Command:
+        if isinstance(command, StartMatch):
+            return replace(command, seed=self.config.seed_for_deal(self._deal_number + 1))
+        return command
 
     def _refresh_prompt(self, *, schedule_timeout: bool, emit_prompt_event: bool) -> tuple[Event, ...]:
         requirement = _prompt_requirement(self.state)
@@ -306,6 +315,10 @@ class TableActor:
 
 def _system_epoch_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _count_deals_started(events: tuple[Event, ...]) -> int:
+    return sum(1 for event in events if event.type == "DealStarted")
 
 
 def _prompt_requirement(state: MatchState) -> PromptRequirement | None:

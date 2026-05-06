@@ -92,6 +92,19 @@ class ClientTests(unittest.TestCase):
             ],
         )
 
+    def test_start_sends_no_seed_payload(self) -> None:
+        calls = []
+
+        def transport(method, path, body, query):
+            calls.append((method, path, body, query))
+            return {"event_seq": 1}
+
+        client = GuandanHttpClient(transport=transport)
+
+        client.start("table-1")
+
+        self.assertEqual(calls, [("POST", "/tables/table-1/start", {}, None)])
+
 
 if __name__ == "__main__":
     unittest.main()

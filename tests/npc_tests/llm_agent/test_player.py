@@ -183,22 +183,39 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertTrue(action_path.exists())
             self.assertEqual(_read_json(memory_path)["player_name"], "South Agent")
 
-    def test_default_storage_paths_are_isolated_by_seat(self) -> None:
+    def test_default_storage_paths_are_isolated_by_player_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             policies = {
-                seat: LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, seat=seat))
-                for seat in ("S", "W", "N")
+                name: LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, player_name=name, seat=seat))
+                for name, seat in (("South Agent", "S"), ("West Agent", "W"), ("North Agent", "N"))
             }
 
-            for seat, policy in policies.items():
+            for seat, policy in zip(("S", "W", "N"), policies.values(), strict=True):
                 policy.choose_action(_lead_request(seat))
 
-            paths = [policy.storage_paths[seat] for seat, policy in policies.items()]
+            paths = [next(iter(policy.storage_paths.values())) for policy in policies.values()]
             self.assertEqual(len(set(paths)), 3)
-            for seat, (memory_path, action_path) in zip(("S", "W", "N"), paths, strict=True):
-                self.assertEqual(memory_path, Path(tmp) / seat / "memory.json")
-                self.assertEqual(action_path, Path(tmp) / seat / "actions.json")
+            for name, seat, (memory_path, action_path) in zip(
+                ("South-Agent", "West-Agent", "North-Agent"),
+                ("S", "W", "N"),
+                paths,
+                strict=True,
+            ):
+                self.assertEqual(memory_path, Path(tmp) / name / "memory.json")
+                self.assertEqual(action_path, Path(tmp) / name / "actions.json")
                 self.assertEqual(_read_json(memory_path)["seat"], seat)
+
+    def test_player_name_storage_survives_seat_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, player_name="Jade", seat="S"))
+
+            policy.choose_action(_lead_request("S"))
+            policy.choose_action(_lead_request("W"))
+
+            self.assertEqual(len(policy.storage_paths), 1)
+            actions = _read_json(Path(tmp) / "Jade" / "actions.json")
+            self.assertEqual([entry["seat"] for entry in actions], ["S", "W"])
+            self.assertEqual(_read_json(Path(tmp) / "Jade" / "memory.json")["seat"], "W")
 
     def test_invalid_provider_action_falls_back_and_logs_llm_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -239,29 +256,35 @@ class LlmAgentPolicyTests(unittest.TestCase):
                     "memory_updates": {"skills": ["West skill"]},
                 }
             )
-            south = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, seat="S"), provider=south_provider)
-            west = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, seat="W"), provider=west_provider)
+            south = LlmAgentPolicy(
+                LlmAgentConfig(storage_dir=tmp, player_name="South Agent", seat="S"),
+                provider=south_provider,
+            )
+            west = LlmAgentPolicy(
+                LlmAgentConfig(storage_dir=tmp, player_name="West Agent", seat="W"),
+                provider=west_provider,
+            )
 
             south.choose_action(_lead_request("S"))
             west.choose_action(_lead_request("W"))
             south.choose_action(_lead_request("S"))
 
             self.assertEqual(south_provider.prompts[-1]["recent_actions"][0]["seat"], "S")
-            self.assertNotIn("West skill", _read_json(Path(tmp) / "S" / "memory.json")["skills"])
-            self.assertNotIn("South skill", _read_json(Path(tmp) / "W" / "memory.json")["skills"])
+            self.assertNotIn("West skill", _read_json(Path(tmp) / "South-Agent" / "memory.json")["skills"])
+            self.assertNotIn("South skill", _read_json(Path(tmp) / "West-Agent" / "memory.json")["skills"])
 
     def test_broker_notifies_all_llm_agents_after_each_submitted_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             broker = NpcBroker(FakeClient(), "table-1")
-            south = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, seat="S"))
-            west = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, seat="W"))
+            south = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, player_name="South Agent", seat="S"))
+            west = LlmAgentPolicy(LlmAgentConfig(storage_dir=tmp, player_name="West Agent", seat="W"))
             broker.add_seat("S", south, "South Agent").controller_id = "c-S"
             broker.add_seat("W", west, "West Agent").controller_id = "c-W"
 
             actions = broker.poll_once("S")
 
             self.assertEqual(actions[0]["type"], "play_cards")
-            west_log = _read_json(Path(tmp) / "W" / "actions.json")
+            west_log = _read_json(Path(tmp) / "West-Agent" / "actions.json")
             observed = [entry for entry in west_log if entry["kind"] == "observed_action"]
             self.assertEqual(observed[0]["actor_seat"], "S")
             self.assertEqual(observed[0]["response_events"][0]["type"], "CardsPlayed")

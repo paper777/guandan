@@ -42,7 +42,7 @@ class LlmAgentPlayer(Player):
         self.config = config or LlmAgentConfig()
         self.provider = provider or provider_from_config(self.config)
         self._fallback = DummyBotPolicy()
-        self._stores_by_seat: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
+        self._stores_by_namespace: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
 
     def choose_action(self, request: ActionRequest) -> JsonObject:
         context = self._prepare_decision(request)
@@ -122,6 +122,8 @@ class LlmAgentPlayer(Player):
         observer_seat = str(observation.get("observer_seat") or self.config.seat or "")
         memory_store, action_log = self._stores_for(observer_seat or None)
         memory = memory_store.load()
+        if observer_seat:
+            memory["seat"] = observer_seat
         action_log.append(
             {
                 "kind": "observed_action",
@@ -138,13 +140,13 @@ class LlmAgentPlayer(Player):
     @property
     def storage_paths(self) -> dict[str, tuple[Path, Path]]:
         return {
-            seat: (memory_store.path, action_log.path)
-            for seat, (memory_store, action_log) in self._stores_by_seat.items()
+            namespace: (memory_store.path, action_log.path)
+            for namespace, (memory_store, action_log) in self._stores_by_namespace.items()
         }
 
     def _stores_for(self, seat: str | None) -> tuple[JsonMemoryStore, JsonActionLog]:
-        key = seat or self.config.seat or self.config.namespace_for(None)
-        stores = self._stores_by_seat.get(key)
+        key = self.config.namespace_for(seat)
+        stores = self._stores_by_namespace.get(key)
         if stores is not None:
             return stores
         display_name = self.config.display_name_for(seat)
@@ -155,7 +157,7 @@ class LlmAgentPlayer(Player):
         )
         action_log = JsonActionLog(self.config.resolved_action_log_path(seat))
         stores = (memory_store, action_log)
-        self._stores_by_seat[key] = stores
+        self._stores_by_namespace[key] = stores
         return stores
 
     def _build_provider_prompt(
@@ -211,7 +213,9 @@ class LlmAgentPlayer(Player):
             if isinstance(skills, list):
                 memory["skills"] = _merge_skills(memory.get("skills"), skills)
         if request is not None:
-            memory["player_name"] = self.config.display_name_for(seat_from_request(request))
+            seat = seat_from_request(request)
+            memory["player_name"] = self.config.display_name_for(seat)
+            memory["seat"] = seat
         _apply_score_events(memory, events or [])
         memory_store.save(memory)
 

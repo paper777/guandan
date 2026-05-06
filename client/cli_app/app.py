@@ -74,7 +74,6 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument("--player-id", help="Human player ID. Defaults to human-<seat>.")
     play.add_argument("--controller-id", help="Human controller ID. Defaults to human-controller-<seat>.")
     play.add_argument("--display-name", help="Human display name. Defaults to the player ID.")
-    play.add_argument("--seed", default="cli-demo", help="Base deal seed used for deterministic CLI play.")
     play.add_argument(
         "--max-bot-actions",
         type=int,

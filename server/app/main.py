@@ -228,7 +228,9 @@ async def _handle_table_action(actor: TableActor, action: str, body: dict[str, A
     if action == "ready":
         return await _dispatch(actor, Ready(controller_id=str(body["controller_id"]), seat=Seat(body["seat"])), body)
     if action == "start":
-        return await _dispatch(actor, StartMatch(seed=body.get("seed")), body)
+        if "seed" in body:
+            raise ValueError("seed is server-configured and cannot be provided by clients")
+        return await _dispatch(actor, StartMatch(), body)
     if action == "play":
         return await _dispatch(
             actor,

@@ -121,7 +121,7 @@ class AppTests(unittest.TestCase):
             )
             self.assertEqual(status, 200)
 
-        status, body = asyncio.run(call_app("POST", f"/tables/{table_id}/start", {"seed": "fixed-seed"}))
+        status, body = asyncio.run(call_app("POST", f"/tables/{table_id}/start"))
 
         self.assertEqual(status, 200)
         self.assertEqual(
@@ -150,7 +150,7 @@ class AppTests(unittest.TestCase):
                 call_app("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": f"c-{seat}"})
             )
             self.assertEqual(status, 200)
-        status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start", {"seed": "fixed-seed"}))
+        status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start"))
         self.assertEqual(status, 200)
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-E"))
@@ -163,6 +163,14 @@ class AppTests(unittest.TestCase):
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-S"))
         self.assertEqual(status, 400)
+
+    def test_start_rejects_client_seed_payload(self) -> None:
+        status, body = asyncio.run(call_app("POST", "/tables"))
+        table_id = body["table_id"]
+
+        status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start", {"seed": "fixed-seed"}))
+
+        self.assertIn(status, {400, 422})
 
     def test_http_rejection_returns_code(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables"))

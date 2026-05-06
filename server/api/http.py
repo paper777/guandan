@@ -137,7 +137,7 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
     )
     async def start(table_id: str, request: StartMatchRequest) -> CommandResponse | JSONResponse:
         actor = _actor_or_404(tables, table_id)
-        return await _command_response(actor, StartMatch(request.seed), request)
+        return await _command_response(actor, StartMatch(), request)
 
     @router.post(
         "/tables/{table_id}/play",

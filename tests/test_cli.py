@@ -66,8 +66,8 @@ class FakeClient:
         self.calls.append(("ready", table_id, seat, controller_id))
         return {"events": [], "snapshot": self._snapshot()}
 
-    def start(self, table_id, *, seed=None):
-        self.calls.append(("start", table_id, seed))
+    def start(self, table_id):
+        self.calls.append(("start", table_id))
         self.phase = "PLAYING"
         self.current_turn = "E"
         return {"events": [{"seq": 1, "type": "MatchStarted", "payload": {"table_id": table_id}}], "snapshot": self._snapshot()}
@@ -168,7 +168,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
         self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
         self.assertNotIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
-        self.assertIn(("start", "table-1", "cli-demo"), client.calls)
+        self.assertIn(("start", "table-1"), client.calls)
 
     def test_human_play_readable_card_label_then_drives_bot_passes(self) -> None:
         client = FakeClient()
@@ -319,10 +319,10 @@ class CliTests(unittest.TestCase):
 
     def test_deal_complete_starts_next_deal_until_match_complete(self) -> None:
         class DealCompleteClient(FakeClient):
-            def start(self, table_id, *, seed=None):
-                self.calls.append(("start", table_id, seed))
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
                 self.event_seq += 1
-                if seed == "cli-demo":
+                if self.calls.count(("start", table_id)) == 1:
                     self.phase = "DEAL_COMPLETE"
                     self.current_turn = None
                     events = [
@@ -349,15 +349,14 @@ class CliTests(unittest.TestCase):
         result = run_cli([], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(("start", "table-1", "cli-demo"), client.calls)
-        self.assertIn(("start", "table-1", "cli-demo:deal-2"), client.calls)
+        self.assertEqual(client.calls.count(("start", "table-1")), 2)
         self.assertIn("match ended; winner EW", result.output)
         self.assertIn("MATCH_COMPLETE | Seat E | Turn -", result.output)
 
     def test_human_tribute_command_submits_resolved_card(self) -> None:
         class TributeClient(FakeClient):
-            def start(self, table_id, *, seed=None):
-                self.calls.append(("start", table_id, seed))
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
                 self.phase = "TRIBUTE"
                 self.current_turn = "E"
                 return {"events": [], "snapshot": self._snapshot()}
@@ -378,8 +377,8 @@ class CliTests(unittest.TestCase):
 
     def test_human_return_command_submits_resolved_card(self) -> None:
         class ReturnClient(FakeClient):
-            def start(self, table_id, *, seed=None):
-                self.calls.append(("start", table_id, seed))
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
                 self.phase = "TRIBUTE"
                 self.current_turn = "E"
                 return {"events": [], "snapshot": self._snapshot()}

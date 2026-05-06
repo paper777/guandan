@@ -71,7 +71,7 @@ async def _handle_message(actor: TableActor, message: WebSocketClientMessage) ->
     elif message.type == "start":
         request = StartMatchRequest.model_validate(payload)
         result = await actor.dispatch_async(
-            StartMatch(request.seed),
+            StartMatch(),
             controller_id=request.controller_id,
             request_id=request.request_id,
         )

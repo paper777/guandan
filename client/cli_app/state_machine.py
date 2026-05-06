@@ -99,7 +99,7 @@ class CliStateMachine:
 
     def _start_next_deal(self) -> JsonObject:
         self.deal_number += 1
-        response = self.client.start(self.session.table_id, seed=deal_seed(self.args.seed, self.deal_number))
+        response = self.client.start(self.session.table_id)
         self.emit(format_command_response(response).rstrip())
         return response.get("snapshot") or self.client.table_snapshot(self.session.table_id)
 
@@ -157,12 +157,6 @@ class CliStateMachine:
         self.emit(format_command_response(response).rstrip())
         public_snapshot = response.get("snapshot") or self.client.table_snapshot(self.session.table_id)
         return drive_bot_turns(self.client, self.session, public_snapshot, self.emit, self.args.max_bot_actions)
-
-
-def deal_seed(base_seed: object, deal_number: int) -> object:
-    if deal_number <= 1:
-        return base_seed
-    return f"{base_seed}:deal-{deal_number}"
 
 
 def drive_bot_turns(

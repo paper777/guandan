@@ -14,10 +14,10 @@ broker.add_seat(
 )
 ```
 
-Each `LlmAgentPolicy` instance owns its own memory, action log, and provider context. By default, storage is namespaced by seat:
+Each `LlmAgentPolicy` instance owns its own memory, action log, and provider context. By default, storage is namespaced by player name so memory follows the player if their seat changes:
 
-- `data/S/memory.json`
-- `data/S/actions.json`
+- `data/South-Agent/memory.json`
+- `data/South-Agent/actions.json`
 
 Both paths are configurable with `memory_path` and `action_log_path`.
 

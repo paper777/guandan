@@ -12,7 +12,7 @@ class LlmAgentConfig:
     player_id: str | None = None
     seat: str | None = None
     personality: str = "balanced"
-    storage_dir: str | Path = Path("data")
+    storage_dir: str | Path = Path("../../data")
     memory_path: str | Path | None = None
     action_log_path: str | Path | None = None
     provider_name: str = "deterministic"
@@ -27,7 +27,7 @@ class LlmAgentConfig:
     max_recent_actions: int = 20
 
     def namespace_for(self, seat: str | None = None) -> str:
-        raw = self.player_id or self.seat or seat or self.player_name or "llm-agent"
+        raw = self.player_name or self.player_id or self.seat or seat or "llm-agent"
         return _safe_path_part(raw)
 
     def display_name_for(self, seat: str | None = None) -> str:

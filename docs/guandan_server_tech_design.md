@@ -281,7 +281,7 @@ Commands are the only way to mutate state:
 - `DetachController(controller_id, seat)`
 - `LeaveTable(player_id)`
 - `Ready(controller_id, seat)`
-- `StartMatch(seed?)`
+- `StartMatch()`
 - `SubmitTribute(controller_id, seat, card_id)`
 - `ReturnTribute(controller_id, seat, card_id)`
 - `PlayCards(controller_id, seat, card_ids, declared_type?, wild_assignments?)`

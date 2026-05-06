@@ -10,14 +10,14 @@ from server.domain.controllers import ControllerCapability, ControllerKind, Cont
 from server.domain.seats import SEATS, Seat
 from server.persistence.sqlite_store import SQLiteEventStore
 from server.services.table_actor import TableActor
-from server.services.table_config import TableConfig
+from server.services.table_config import DEFAULT_RANDOM_SEED_BYTES, TableConfig
 
 
 class TableActorTests(unittest.TestCase):
     def test_dispatch_persists_events_and_replays_idempotent_request(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SQLiteEventStore(Path(tmp) / "events.db")
-            actor = TableActor("table-1", event_store=store)
+            actor = TableActor("table-1", event_store=store, config=TableConfig(deal_seed="fixed-seed"))
             player = PlayerRef("p-E", "E", PlayerKind.HUMAN)
             controller = ControllerRef(
                 "c-E",
@@ -46,7 +46,7 @@ class TableActorTests(unittest.TestCase):
             for seat in SEATS:
                 actor.dispatch(Ready(controller(seat).id, seat))
 
-            result = actor.dispatch(StartMatch(seed="fixed-seed"), controller_id="c-E", request_id="start-1")
+            result = actor.dispatch(StartMatch(), controller_id="c-E", request_id="start-1")
             loaded = store.load_events(actor.match_id)
             store.close()
 
@@ -63,14 +63,14 @@ class TableActorTests(unittest.TestCase):
     def test_initializes_state_from_existing_event_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SQLiteEventStore(Path(tmp) / "events.db")
-            actor = TableActor("table-1", match_id="match-1", event_store=store)
+            actor = TableActor("table-1", match_id="match-1", event_store=store, config=TableConfig(deal_seed="fixed-seed"))
             for seat in SEATS:
                 actor.dispatch(JoinTable(player(seat), controller(seat), seat))
             for seat in SEATS:
                 actor.dispatch(Ready(controller(seat).id, seat))
-            actor.dispatch(StartMatch(seed="fixed-seed"))
+            actor.dispatch(StartMatch())
 
-            restored = TableActor("table-1", match_id="match-1", event_store=store)
+            restored = TableActor("table-1", match_id="match-1", event_store=store, config=TableConfig(deal_seed="fixed-seed"))
             store.close()
 
         self.assertEqual(restored.state, actor.state)
@@ -92,6 +92,23 @@ class TableActorTests(unittest.TestCase):
         actor = TableActor("table-1")
 
         self.assertEqual(actor.config.action_timeout_seconds, 45)
+
+    def test_table_config_uses_server_random_device_for_unpinned_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            random_seed = b"x" * DEFAULT_RANDOM_SEED_BYTES
+            path = Path(tmp) / "random-device"
+            path.write_bytes(random_seed)
+            config = TableConfig(random_seed_path=path)
+
+            self.assertEqual(config.seed_for_deal(1), random_seed)
+
+    def test_actor_uses_server_configured_seed(self) -> None:
+        first = started_actor_sync(deal_seed="fixed-seed", command_seed="client-seed")
+        second = started_actor_sync(deal_seed="fixed-seed", command_seed="different-client-seed")
+
+        assert first.state.deal is not None
+        assert second.state.deal is not None
+        self.assertEqual(first.state.deal.hands, second.state.deal.hands)
 
     def test_start_match_schedules_action_prompt_deadline(self) -> None:
         actor = started_actor_sync()
@@ -169,13 +186,17 @@ def controller(seat: Seat) -> ControllerRef:
     )
 
 
-def started_actor_sync() -> TableActor:
-    actor = TableActor("table-1")
+def started_actor_sync(
+    *,
+    deal_seed: str | None = "fixed-seed",
+    command_seed: str | None = None,
+) -> TableActor:
+    actor = TableActor("table-1", config=TableConfig(deal_seed=deal_seed))
     for seat in SEATS:
         actor.dispatch(JoinTable(player(seat), controller(seat), seat))
     for seat in SEATS:
         actor.dispatch(Ready(controller(seat).id, seat))
-    actor.dispatch(StartMatch(seed="fixed-seed"))
+    actor.dispatch(StartMatch(seed=command_seed))
     return actor
 
 
@@ -184,12 +205,12 @@ async def started_actor_async(
     clock=None,
     sleeper=None,
 ) -> TableActor:
-    actor = TableActor("table-1", config=TableConfig(), clock=clock, sleeper=sleeper)
+    actor = TableActor("table-1", config=TableConfig(deal_seed="fixed-seed"), clock=clock, sleeper=sleeper)
     for seat in SEATS:
         await actor.dispatch_async(JoinTable(player(seat), controller(seat), seat))
     for seat in SEATS:
         await actor.dispatch_async(Ready(controller(seat).id, seat))
-    await actor.dispatch_async(StartMatch(seed="fixed-seed"))
+    await actor.dispatch_async(StartMatch())
     return actor
 
 

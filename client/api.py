@@ -164,8 +164,8 @@ class GuandanHttpClient:
     def ready(self, table_id: str, seat: str, controller_id: str) -> JsonObject:
         return self._request("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": controller_id})
 
-    def start(self, table_id: str, *, seed: str | int | None = None) -> JsonObject:
-        return self._request("POST", f"/tables/{table_id}/start", _without_none({"seed": seed}))
+    def start(self, table_id: str) -> JsonObject:
+        return self._request("POST", f"/tables/{table_id}/start", {})
 
     def play_cards(
         self,

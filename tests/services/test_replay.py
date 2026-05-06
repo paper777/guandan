@@ -8,6 +8,7 @@ from server.domain.events import Event
 from server.domain.seats import SEATS, Seat
 from server.services.replay import rebuild_state_from_events
 from server.services.table_actor import TableActor
+from server.services.table_config import TableConfig
 
 
 class ReplayTests(unittest.TestCase):
@@ -32,13 +33,13 @@ class ReplayTests(unittest.TestCase):
 
 
 def _started_actor_and_events() -> tuple[TableActor, list[Event]]:
-    actor = TableActor("table-1")
+    actor = TableActor("table-1", config=TableConfig(deal_seed="fixed-seed"))
     events: list[Event] = []
     for seat in SEATS:
         events.extend(actor.dispatch(JoinTable(player(seat), controller(seat), seat)).events)
     for seat in SEATS:
         events.extend(actor.dispatch(Ready(controller(seat).id, seat)).events)
-    events.extend(actor.dispatch(StartMatch(seed="fixed-seed")).events)
+    events.extend(actor.dispatch(StartMatch()).events)
     return actor, events
 
 
