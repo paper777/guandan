@@ -9,6 +9,7 @@ description = "Authoritative Python server foundation for Guandan."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
+  "rich>=13.7",
   "uvicorn[standard]>=0.30",
 ]
 
@@ -35,6 +36,7 @@ dev = [
 [tool.setuptools]
 packages = [
   "client",
+  "client.cli_app",
   "server",
   "server.api",
   "server.app",
@@ -51,6 +53,7 @@ packages = [
 
 [tool.setuptools.package-dir]
 client = "client"
+"client.cli_app" = "client/cli_app"
 server = "server"
 "server.api" = "server/api"
 "server.app" = "server/app"

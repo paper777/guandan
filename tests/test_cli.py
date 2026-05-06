@@ -13,6 +13,7 @@ from client.cli import (
     format_command_response,
     format_friend_mark,
     format_hand,
+    format_timeout_fallback,
     format_npc_metadata,
     format_public_snapshot,
     format_seat_snapshot,
@@ -27,6 +28,8 @@ class FakeClient:
         self.seats: dict[str, dict[str, str]] = {}
         self.phase = "WAITING_FOR_PLAYERS"
         self.current_turn: str | None = None
+        self.current_trick = None
+        self.action_deadline_epoch_ms = None
         self.event_seq = 0
         self.calls: list[tuple] = []
         self.hands = {
@@ -101,6 +104,34 @@ class FakeClient:
             "snapshot": self._snapshot(),
         }
 
+    def submit_tribute(self, table_id, seat, controller_id, card_id):
+        self.calls.append(("submit_tribute", table_id, seat, controller_id, card_id))
+        self.event_seq += 1
+        return {
+            "events": [
+                {
+                    "seq": self.event_seq,
+                    "type": "TributePaid",
+                    "payload": {"giver": seat, "receiver": "S", "card_id": card_id},
+                }
+            ],
+            "snapshot": self._snapshot(),
+        }
+
+    def return_tribute(self, table_id, seat, controller_id, card_id):
+        self.calls.append(("return_tribute", table_id, seat, controller_id, card_id))
+        self.event_seq += 1
+        return {
+            "events": [
+                {
+                    "seq": self.event_seq,
+                    "type": "TributeReturned",
+                    "payload": {"giver": "S", "receiver": seat, "card_id": card_id},
+                }
+            ],
+            "snapshot": self._snapshot(),
+        }
+
     def _snapshot(self):
         return {
             "table_id": self.table_id,
@@ -108,6 +139,10 @@ class FakeClient:
             "seats": self.seats,
             "hand_counts": {seat: len(hand) for seat, hand in self.hands.items()},
             "current_turn": self.current_turn,
+            "acting_seat": self.current_turn,
+            "current_level": "2",
+            "current_trick": self.current_trick,
+            "action_deadline_epoch_ms": self.action_deadline_epoch_ms,
             "finish_order": [],
             "event_seq": self.event_seq,
         }
@@ -122,9 +157,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Table table-1 | You are E", result.output)
         self.assertIn("PLAYING | Seat E | Turn E", result.output)
-        self.assertIn("Players: E human-E 3 | S Jade 1 [", result.output)
-        self.assertIn("W(F) River 1 [", result.output)
-        self.assertIn("N Atlas 1 [", result.output)
+        self.assertIn("E human-E 3 (You)", result.output)
+        self.assertIn("S Jade 1", result.output)
+        self.assertIn("W River 1 (F)", result.output)
+        self.assertIn("N Atlas 1", result.output)
+        self.assertIn("codex-cli/gpt-5.5", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", "human-E"), client.calls)
         self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
@@ -194,6 +231,172 @@ class CliTests(unittest.TestCase):
         self.assertIn("2: S passed", result.output)
         self.assertIn("3: W passed", result.output)
         self.assertIn("4: N passed", result.output)
+
+    def test_human_timeout_prints_server_fallback_action(self) -> None:
+        class TimeoutPassClient(FakeClient):
+            def seat_snapshot(self, table_id, seat, controller_id):
+                snapshot = super().seat_snapshot(table_id, seat, controller_id)
+                snapshot["legal_action"] = "play_or_pass"
+                snapshot["public"]["current_trick"] = {
+                    "last_play_seat": "N",
+                    "hand_type": "single",
+                    "card_ids": ["D1-S-3"],
+                }
+                snapshot["public"]["action_deadline_epoch_ms"] = 1
+                return snapshot
+
+        client = TimeoutPassClient()
+        timed_out = False
+
+        def input_timeout(prompt):
+            nonlocal timed_out
+            if not timed_out:
+                timed_out = True
+                client.current_turn = "S"
+                client.current_trick = {"last_play_seat": "N", "hand_type": "single", "card_ids": ["D1-S-3"]}
+                client.event_seq += 1
+                return None
+            return "quit"
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=input_timeout, client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("E timed out; server fallback passed.", result.output)
+
+    def test_timeout_fallback_shows_auto_played_lead_card_from_snapshot(self) -> None:
+        output = format_timeout_fallback(
+            {
+                "table_id": "table-1",
+                "phase": "PLAYING",
+                "current_turn": "E",
+                "acting_seat": "E",
+                "current_trick": None,
+                "event_seq": 4,
+            },
+            {
+                "table_id": "table-1",
+                "phase": "PLAYING",
+                "current_turn": "S",
+                "acting_seat": "S",
+                "current_trick": {
+                    "last_play_seat": "E",
+                    "hand_type": "single",
+                    "card_ids": ["D1-C-3"],
+                },
+                "event_seq": 6,
+            },
+            kind="lead",
+        )
+
+        self.assertEqual(output, "E timed out; server fallback played single [♣️ 3].")
+
+    def test_timeout_fallback_shows_passed_out_trick_from_snapshot(self) -> None:
+        output = format_timeout_fallback(
+            {
+                "table_id": "table-1",
+                "phase": "PLAYING",
+                "current_turn": "E",
+                "acting_seat": "E",
+                "current_trick": {
+                    "last_play_seat": "N",
+                    "hand_type": "single",
+                    "card_ids": ["D1-S-3"],
+                },
+                "event_seq": 4,
+            },
+            {
+                "table_id": "table-1",
+                "phase": "PLAYING",
+                "current_turn": "N",
+                "acting_seat": "N",
+                "current_trick": None,
+                "event_seq": 6,
+            },
+            kind="play_or_pass",
+        )
+
+        self.assertEqual(output, "E timed out; server fallback passed and ended the trick. N leads next.")
+
+    def test_deal_complete_starts_next_deal_until_match_complete(self) -> None:
+        class DealCompleteClient(FakeClient):
+            def start(self, table_id, *, seed=None):
+                self.calls.append(("start", table_id, seed))
+                self.event_seq += 1
+                if seed == "cli-demo":
+                    self.phase = "DEAL_COMPLETE"
+                    self.current_turn = None
+                    events = [
+                        {
+                            "seq": self.event_seq,
+                            "type": "LevelAdvanced",
+                            "payload": {"team": "EW", "previous_level": "2", "next_level": "3"},
+                        }
+                    ]
+                else:
+                    self.phase = "MATCH_COMPLETE"
+                    self.current_turn = None
+                    events = [
+                        {
+                            "seq": self.event_seq,
+                            "type": "MatchEnded",
+                            "payload": {"winning_team": "EW"},
+                        }
+                    ]
+                return {"events": events, "snapshot": self._snapshot()}
+
+        client = DealCompleteClient()
+
+        result = run_cli([], input_fn=lambda prompt: "quit", client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("start", "table-1", "cli-demo"), client.calls)
+        self.assertIn(("start", "table-1", "cli-demo:deal-2"), client.calls)
+        self.assertIn("match ended; winner EW", result.output)
+        self.assertIn("MATCH_COMPLETE | Seat E | Turn -", result.output)
+
+    def test_human_tribute_command_submits_resolved_card(self) -> None:
+        class TributeClient(FakeClient):
+            def start(self, table_id, *, seed=None):
+                self.calls.append(("start", table_id, seed))
+                self.phase = "TRIBUTE"
+                self.current_turn = "E"
+                return {"events": [], "snapshot": self._snapshot()}
+
+            def seat_snapshot(self, table_id, seat, controller_id):
+                snapshot = super().seat_snapshot(table_id, seat, controller_id)
+                snapshot["legal_action"] = "tribute"
+                return snapshot
+
+        client = TributeClient()
+        commands = iter(["tribute C3", "quit"])
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: next(commands), client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("submit_tribute", "table-1", "E", "human-controller-E", "D1-C-3"), client.calls)
+        self.assertIn("paid tribute", result.output)
+
+    def test_human_return_command_submits_resolved_card(self) -> None:
+        class ReturnClient(FakeClient):
+            def start(self, table_id, *, seed=None):
+                self.calls.append(("start", table_id, seed))
+                self.phase = "TRIBUTE"
+                self.current_turn = "E"
+                return {"events": [], "snapshot": self._snapshot()}
+
+            def seat_snapshot(self, table_id, seat, controller_id):
+                snapshot = super().seat_snapshot(table_id, seat, controller_id)
+                snapshot["legal_action"] = "return_tribute"
+                return snapshot
+
+        client = ReturnClient()
+        commands = iter(["return C3", "quit"])
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: next(commands), client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(("return_tribute", "table-1", "E", "human-controller-E", "D1-C-3"), client.calls)
+        self.assertIn("returned tribute", result.output)
 
     def test_cli_dummy_lineup_uses_named_dummy_players(self) -> None:
         client = FakeClient()
@@ -341,7 +544,10 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("PLAYING | Seat E | Turn E", output)
-        self.assertIn("Players: E East 3 | S South 4 | W(F) - 0 | N - 0", output)
+        self.assertIn("E East 3 (You)", output)
+        self.assertIn("S South 4", output)
+        self.assertIn("W - 0 (F)", output)
+        self.assertIn("N - 0", output)
         self.assertNotIn("Your seat:", output)
 
     def test_friend_mark_identifies_partner_for_viewer_seat(self) -> None:
