@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from client.api import ActionRequest, JsonObject
+from client.types import ActionRequest, JsonObject
 from server.domain.cards import CARD_BY_ID, Rank
 
 
@@ -37,6 +37,7 @@ class AgentRequestContext:
             "partner": partner_for_seat(seat),
             "opponents": list(opponents_for_seat(seat)),
             "deal_id": public_snapshot.get("deal_id"),
+            "table_id": request.snapshot.get("table_id"),
             "phase": public_snapshot.get("phase"),
             "event_seq": public_snapshot.get("event_seq"),
             "prompt_kind": request.prompt.get("kind"),
@@ -45,6 +46,8 @@ class AgentRequestContext:
             "acting_seat": public_snapshot.get("acting_seat") or public_snapshot.get("current_turn"),
             "hand_counts": public_snapshot.get("hand_counts", {}),
             "finish_order": public_snapshot.get("finish_order", []),
+            "action_deadline_epoch_ms": public_snapshot.get("action_deadline_epoch_ms"),
+            "action_timeout_seconds": public_snapshot.get("action_timeout_seconds"),
         }
         if current_trick is not None:
             table_context["current_trick"] = current_trick

@@ -35,8 +35,11 @@ dev = [
 
 [tool.setuptools]
 packages = [
+  "common",
   "client",
-  "client.cli_app",
+  "client.tui",
+  "db",
+  "db.player",
   "server",
   "server.api",
   "server.app",
@@ -45,15 +48,17 @@ packages = [
   "server.persistence",
   "server.services",
   "npc",
-  "npc.broker",
   "npc.common",
   "npc.dummy_bot",
   "npc.llm_agent",
 ]
 
 [tool.setuptools.package-dir]
+common = "common"
 client = "client"
-"client.cli_app" = "client/cli_app"
+"client.tui" = "client/tui"
+db = "db"
+"db.player" = "db/player"
 server = "server"
 "server.api" = "server/api"
 "server.app" = "server/app"
@@ -62,7 +67,6 @@ server = "server"
 "server.persistence" = "server/persistence"
 "server.services" = "server/services"
 npc = "npc"
-"npc.broker" = "npc/broker"
 "npc.common" = "npc/common"
 "npc.dummy_bot" = "npc/dummy_bot"
 "npc.llm_agent" = "npc/llm_agent"

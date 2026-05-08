@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
+from client.types import JsonObject
 
-JsonObject = dict[str, Any]
 Transport = Callable[[str, str, JsonObject | None, JsonObject | None], JsonObject]
 
 
@@ -17,30 +17,6 @@ class GuandanClientError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.payload = payload or {}
-
-
-NpcClientError = GuandanClientError
-
-
-@dataclass(frozen=True, slots=True)
-class ActionRequest:
-    request_id: str
-    prompt: JsonObject
-    snapshot: JsonObject
-
-    @classmethod
-    def from_payload(cls, payload: JsonObject) -> "ActionRequest":
-        return cls(
-            request_id=str(payload.get("request_id", "")),
-            prompt=_dict(payload.get("prompt")),
-            snapshot=_dict(payload.get("snapshot")),
-        )
-
-
-class NpcPolicy(Protocol):
-    def choose_action(self, request: ActionRequest) -> JsonObject:
-        """Return a command-like action for the broker or HTTP agent server."""
-
 
 @dataclass(slots=True)
 class JsonHttpClient:
@@ -297,10 +273,3 @@ def _error_message(payload: JsonObject) -> str:
 
 def _without_none(payload: JsonObject) -> JsonObject:
     return {key: value for key, value in payload.items() if value is not None}
-
-
-def _dict(value: Any) -> JsonObject:
-    return value if isinstance(value, dict) else {}
-
-
-GuandanNpcClient = GuandanHttpClient

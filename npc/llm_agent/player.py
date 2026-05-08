@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from client.api import ActionRequest, JsonObject
-from npc.common.player import Player
-from npc.dummy_bot.policy import DummyBotPolicy
+from client.types import ActionRequest, JsonObject
+from db.player.types import Player
+from common.log import deadline_fields, deadline_remaining_ms, elapsed_ms, trace_event
+from npc.dummy_bot.player import DummyBotPlayer
 from npc.llm_agent.actions import validate_action
 from npc.llm_agent.config import LlmAgentConfig
 from npc.llm_agent.context import (
@@ -53,13 +55,53 @@ class LlmAgentPlayer(Player):
             compaction_char_limit=self.config.memory_compaction_char_limit,
             max_output_tokens=self.config.memory_max_output_tokens,
         )
-        self._fallback = DummyBotPolicy()
+        self._fallback = DummyBotPlayer()
         self._stores_by_namespace: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
 
     def choose_action(self, request: ActionRequest) -> JsonObject:
+        started = time.perf_counter()
+        public = request.snapshot.get("public")
+        public_snapshot = public if isinstance(public, dict) else {}
+        deadline_epoch_ms = public_snapshot.get("action_deadline_epoch_ms")
+        trace_event(
+            "llm_player.decision_started",
+            request_id=request.request_id,
+            table_id=snapshot_value(request, "table_id"),
+            seat=seat_from_request(request),
+            player_name=self.config.display_name_for(seat_from_request(request)),
+            provider=self.config.provider_name,
+            model=self.config.model_name,
+            legal_action=request.prompt.get("kind"),
+            event_seq=public_value(request, "event_seq"),
+            **deadline_fields(deadline_epoch_ms),
+        )
         context = self._prepare_decision(request)
+        trace_event(
+            "llm_player.prompt_prepared",
+            request_id=request.request_id,
+            table_id=snapshot_value(request, "table_id"),
+            seat=context.request_context.seat,
+            duration_ms=elapsed_ms(started),
+            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+            recent_action_count=len(context.provider_prompt.get("recent_actions", [])),
+            hand_count=len(context.provider_prompt.get("snapshot", {}).get("hand", []))
+            if isinstance(context.provider_prompt.get("snapshot"), dict)
+            else None,
+        )
         provider_action = self._request_provider(context.provider_prompt)
         action, fallback_used = self._select_action(provider_action, context)
+        trace_event(
+            "llm_player.action_selected",
+            request_id=request.request_id,
+            table_id=snapshot_value(request, "table_id"),
+            seat=context.request_context.seat,
+            duration_ms=elapsed_ms(started),
+            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+            action=action,
+            fallback_used=fallback_used,
+            provider_result_type=provider_action.get("type"),
+            provider_error=provider_action.get("message") if provider_action.get("type") == "error" else None,
+        )
 
         self._record_decision(context, action, provider_action, fallback_used)
         self._update_memory(
@@ -68,6 +110,15 @@ class LlmAgentPlayer(Player):
             provider_action,
             request=request,
             action_log=context.action_log,
+        )
+        trace_event(
+            "llm_player.decision_completed",
+            request_id=request.request_id,
+            table_id=snapshot_value(request, "table_id"),
+            seat=context.request_context.seat,
+            duration_ms=elapsed_ms(started),
+            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+            fallback_used=fallback_used,
         )
         return action
 
@@ -235,10 +286,45 @@ class LlmAgentPlayer(Player):
         }
 
     def _request_provider(self, prompt: JsonObject) -> JsonObject:
+        started = time.perf_counter()
+        request_id = str(prompt.get("request_id") or "")
+        table_context = prompt.get("table_context") if isinstance(prompt.get("table_context"), dict) else {}
+        deadline_epoch_ms = table_context.get("action_deadline_epoch_ms")
+        trace_event(
+            "llm_player.provider_started",
+            request_id=request_id,
+            table_id=table_context.get("table_id"),
+            seat=table_context.get("seat"),
+            provider=self.config.provider_name,
+            model=self.config.model_name,
+            **deadline_fields(deadline_epoch_ms),
+        )
         try:
             action = self.provider.choose_action(prompt)
         except Exception as exc:
+            trace_event(
+                "llm_player.provider_failed",
+                request_id=request_id,
+                table_id=table_context.get("table_id"),
+                seat=table_context.get("seat"),
+                provider=self.config.provider_name,
+                model=self.config.model_name,
+                duration_ms=elapsed_ms(started),
+                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             return {"type": "error", "message": str(exc)}
+        trace_event(
+            "llm_player.provider_completed",
+            request_id=request_id,
+            table_id=table_context.get("table_id"),
+            seat=table_context.get("seat"),
+            provider=self.config.provider_name,
+            model=self.config.model_name,
+            duration_ms=elapsed_ms(started),
+            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+            response_type=action.get("type") if isinstance(action, dict) else type(action).__name__,
+        )
         return action if isinstance(action, dict) else {"type": "error", "message": "provider returned non-object"}
 
     def _update_memory(

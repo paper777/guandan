@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from common.log import deadline_remaining_ms, trace_event
 from server.domain.cards import CARD_BY_ID, Rank, is_red_heart_level_card
 from server.domain.commands import Command, Pass, PlayCards, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.comparator import RankContext
@@ -207,6 +208,18 @@ class TableActor:
             self._schedule_timeout_task()
         if not emit_prompt_event:
             return ()
+        trace_event(
+            "server.action_prompted",
+            table_id=self.table_id,
+            match_id=self.match_id,
+            seat=self._active_prompt.seat.value,
+            kind=self._active_prompt.kind,
+            prompt_id=self._active_prompt.prompt_id,
+            state_seq=self._active_prompt.state_seq,
+            started_epoch_ms=self._active_prompt.started_epoch_ms,
+            deadline_epoch_ms=self._active_prompt.deadline_epoch_ms,
+            timeout_seconds=self.config.action_timeout_seconds,
+        )
         return (self._service_event("ActionPrompted", self._prompt_payload(self._active_prompt)),)
 
     def _schedule_timeout_task(self) -> None:
@@ -214,6 +227,16 @@ class TableActor:
             return
         prompt_id = self._active_prompt.prompt_id
         delay = max(0.0, (self._active_prompt.deadline_epoch_ms - self._clock()) / 1000)
+        trace_event(
+            "server.timeout_scheduled",
+            table_id=self.table_id,
+            match_id=self.match_id,
+            seat=self._active_prompt.seat.value,
+            kind=self._active_prompt.kind,
+            prompt_id=prompt_id,
+            delay_seconds=round(delay, 3),
+            deadline_epoch_ms=self._active_prompt.deadline_epoch_ms,
+        )
         self._timeout_task = asyncio.create_task(self._timeout_after(prompt_id, delay))
 
     def _cancel_timeout_task(self) -> None:
@@ -235,6 +258,18 @@ class TableActor:
         prompt = self._active_prompt
         if prompt is None or prompt.prompt_id != prompt_id:
             return ActorResult(events=())
+        trace_event(
+            "server.action_timed_out",
+            table_id=self.table_id,
+            match_id=self.match_id,
+            seat=prompt.seat.value,
+            kind=prompt.kind,
+            prompt_id=prompt.prompt_id,
+            state_seq=prompt.state_seq,
+            deadline_epoch_ms=prompt.deadline_epoch_ms,
+            deadline_remaining_ms=deadline_remaining_ms(prompt.deadline_epoch_ms, now_epoch_ms=self._clock()),
+            timeout_fallback=self.config.timeout_fallback.value,
+        )
 
         timeout_event = self._service_event(
             "ActionTimedOut",
@@ -247,6 +282,15 @@ class TableActor:
         )
         command = self._fallback_command(prompt)
         if command is None:
+            trace_event(
+                "server.timeout_fallback_failed",
+                table_id=self.table_id,
+                match_id=self.match_id,
+                seat=prompt.seat.value,
+                kind=prompt.kind,
+                prompt_id=prompt.prompt_id,
+                reason="fallback command could not be built",
+            )
             result = ActorResult(
                 events=(timeout_event,),
                 rejection=CommandRejected(RejectCode.ACTION_TIMEOUT, "timeout fallback could not be built"),
@@ -257,6 +301,19 @@ class TableActor:
 
         fallback_result = reduce_command(self.state, command)
         if fallback_result.rejection is not None:
+            trace_event(
+                "server.timeout_fallback_rejected",
+                table_id=self.table_id,
+                match_id=self.match_id,
+                seat=prompt.seat.value,
+                kind=prompt.kind,
+                prompt_id=prompt.prompt_id,
+                command_type=type(command).__name__,
+                rejection={
+                    "code": fallback_result.rejection.code.value,
+                    "message": fallback_result.rejection.message,
+                },
+            )
             result = ActorResult(events=(timeout_event,), rejection=fallback_result.rejection)
             if self.event_store is not None:
                 self.event_store.append_events(self.match_id, result.events)
@@ -277,6 +334,17 @@ class TableActor:
         )
         prompt_events = self._refresh_prompt(schedule_timeout=True, emit_prompt_event=True)
         events = (timeout_event, *fallback_events, applied_event, *prompt_events)
+        trace_event(
+            "server.timeout_fallback_applied",
+            table_id=self.table_id,
+            match_id=self.match_id,
+            seat=prompt.seat.value,
+            kind=prompt.kind,
+            prompt_id=prompt.prompt_id,
+            command_type=type(command).__name__,
+            fallback_event_types=[event.type for event in fallback_events],
+            next_prompt=self._prompt_payload(self._active_prompt) if self._active_prompt is not None else None,
+        )
         if self.event_store is not None and events:
             self.event_store.append_events(self.match_id, events)
         return ActorResult(events=events)

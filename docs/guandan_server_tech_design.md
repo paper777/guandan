@@ -106,8 +106,13 @@ The rule engine must not depend on FastAPI, SQLite, or wall-clock time. It shoul
 
 ```text
 client/
-  api.py
+  broker.py
+  http_client.py
   cli.py
+db/
+  player/
+    store.py
+    types.py
 server/
   api/
     http.py
@@ -144,7 +149,6 @@ server/
     domain/
     api/
 npc/
-  broker/
   common/
   dummy_bot/
 ```

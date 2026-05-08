@@ -7,14 +7,15 @@ Architecture notes live in `docs/guandan_server_tech_design.md`.
 Source layout:
 
 - `pyproject.toml`, `uv.lock`: root Python project and uv environment configuration.
-- `client/`: shared CLI, Guandan table HTTP client, and NPC protocol request types.
+- `client/`: shared CLI, Guandan table HTTP client, broker, and NPC protocol request types.
+- `db/player/`: NPC player profiles, lineup selection, LLM config, and player statistics storage.
 - `server/`: Python server package source.
 - `server/domain/`: pure Guandan rules engine, state, commands, events, scoring, and tribute logic.
 - `server/controllers/`: human, local bot, and external AI agent controller adapters.
 - `server/api/`: FastAPI HTTP and WebSocket schemas/routes.
 - `server/services/`: table actor, lobby, replay, and snapshot filtering.
 - `server/persistence/`: SQLite models and repositories.
-- `npc/`: external NPC policy, broker, and policy server helpers.
+- `npc/`: external NPC policy implementations and policy server helpers.
 - `tests/`: unit, property, and integration tests mirroring source modules.
 
 Keep rule logic independent from web, SQLite, and wall-clock time.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from client.api import JsonObject
+from client.types import JsonObject
 
 
 SYSTEM_PROMPT = """You are a Guandan MASTER level player. Guandan is a four-player partnership climbing game.
@@ -27,12 +27,12 @@ The current level changes rank strength. Treat current_level in the prompt or pu
     - three_of_a_kind
     - full_house
     - straight of exactly five ranks
-    - three_pair_run of exactly three consecutive pairs, eg: '2,2,3,3,4,4' is valid, but '2,2,4,4,5,5' is invalid unless '2,2' or '5,5' are heart level cards
-    - triple_run of exactly two consecutive triples, eg: '3,3,3,4,4,4' is valid, but '3,3,3,5,5,5' is invalid
+    - three_pair_run: exactly 6 cards forming exactly three adjacent ranks with exactly two cards per rank after any red-heart level wildcard assignments. Example valid: '2,2,3,3,4,4'. Invalid: '2,2,4,4,5,5' because the ranks are not three consecutive pairs; do not call it three_pair_run just because it contains pairs.
+    - triple_run: exactly 6 cards forming exactly two adjacent ranks with exactly three cards per rank after any red-heart level wildcard assignments. Example valid: '3,3,3,4,4,4'. Invalid: '3,3,3,5,5,5' because the triples are not consecutive; do not call it triple_run just because it contains two triples.
     - bomb of four or more same-rank cards
     - straight_flush of exactly five same-suit consecutive cards
     - four_jokers
-    ** Note!!!: be careful with three_pair_run and tripple_run! cards should be consecutive **
+    ** Critical shape check: three_pair_run and triple_run are easy to mislabel. First group cards by rank after wildcard assignment, then verify the group counts are exactly 2-2-2 or 3-3 and the rank groups are adjacent with no gaps. If there is any gap, choose another declared_type or do not play those cards. **
 - When responding, beat the current trick with the same comparable hand type and length, or with a valid bomb-like hand. Passing is legal only for play_or_pass.
 - Bomb hierarchy: 
     - four_jokers beats everything

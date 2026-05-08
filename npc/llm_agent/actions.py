@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from client.api import JsonObject
+from client.types import JsonObject
 from npc.llm_agent.context import AgentRequestContext
 
 

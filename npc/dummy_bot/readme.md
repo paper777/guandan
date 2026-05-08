@@ -1,6 +1,6 @@
 # Dummy Bot
 
-The dummy bot is a minimal NPC policy used for local development and protocol testing.
+The dummy bot is a minimal NPC player used for local development and protocol testing.
 
 Behavior:
 

@@ -20,7 +20,16 @@ from server.domain.controllers import ControllerCapability
 from server.domain.events import CommandRejected, Event, ReducerResult, RejectCode
 from server.domain.hand_types import AmbiguousHandError, parse_hand
 from server.domain.seats import SEATS, Seat, next_seat, partner_for_seat, team_for_seat
-from server.domain.state import DealResult, DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
+from server.domain.state import (
+    DealResult,
+    DealState,
+    MatchPhase,
+    MatchState,
+    ScoreState,
+    TributeObligation,
+    TributeState,
+    TrickState,
+)
 
 
 def reduce_command(state: MatchState, command: Command) -> ReducerResult:
@@ -47,7 +56,7 @@ def reduce_command(state: MatchState, command: Command) -> ReducerResult:
 
 def _join_table(state: MatchState, command: JoinTable) -> ReducerResult:
     seat = command.requested_seat
-    if seat in state.seats:
+    if seat in state.seats and not _can_replace_seat_for_next_match(state):
         return _reject(state, RejectCode.SEAT_OCCUPIED, f"seat {seat.value} is already occupied")
     seats = dict(state.seats)
     controllers = dict(state.controllers)
@@ -55,7 +64,8 @@ def _join_table(state: MatchState, command: JoinTable) -> ReducerResult:
     controllers[seat] = command.controller
     phase = MatchPhase.READY_CHECK if len(seats) == len(SEATS) else state.phase
     next_state = state.bump_seq()
-    next_state = replace(next_state, seats=seats, controllers=controllers, phase=phase)
+    ready_seats = frozenset(item for item in state.ready_seats if item != seat)
+    next_state = replace(next_state, seats=seats, controllers=controllers, ready_seats=ready_seats, phase=phase)
     return ReducerResult(
         state=next_state,
         events=(
@@ -73,6 +83,14 @@ def _join_table(state: MatchState, command: JoinTable) -> ReducerResult:
                 },
             ),
         ),
+    )
+
+
+def _can_replace_seat_for_next_match(state: MatchState) -> bool:
+    return (
+        state.phase in {MatchPhase.MATCH_COMPLETE, MatchPhase.READY_CHECK}
+        and state.last_deal_result is not None
+        and state.last_deal_result.match_complete
     )
 
 
@@ -121,6 +139,14 @@ def _ready(state: MatchState, command: Ready) -> ReducerResult:
 def _start_match(state: MatchState, command: StartMatch) -> ReducerResult:
     if state.phase == MatchPhase.DEAL_COMPLETE and state.last_deal_result is not None:
         return _start_next_deal(state, command)
+    if state.last_deal_result is not None and state.last_deal_result.match_complete:
+        state = replace(
+            state,
+            current_level=Rank.TWO,
+            deal=None,
+            last_deal_result=None,
+            scores=ScoreState(),
+        )
     if not state.is_full:
         return _reject(state, RejectCode.TABLE_NOT_FULL, "all four seats must be occupied and controlled")
     if set(state.ready_seats) != set(SEATS):

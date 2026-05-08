@@ -4,7 +4,7 @@ import unittest
 
 from server.domain.cards import CARD_BY_ID, Card, Rank, Suit
 from server.domain.seats import Seat
-from tools.card_recorder import CardRecorder, InMemoryCardRecorderStore
+from common.card_recorder import CardRecorder, InMemoryCardRecorderStore
 
 
 class CardRecorderTests(unittest.TestCase):

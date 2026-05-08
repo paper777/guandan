@@ -4,13 +4,14 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from client.api import ActionRequest, JsonObject, NpcPolicy
+from client.types import ActionRequest, JsonObject
+from db.player.types import Player
 
 
-def run_policy_server(policy: NpcPolicy, *, host: str = "127.0.0.1", port: int = 9001) -> None:
+def run_policy_server(policy: Player, *, host: str = "127.0.0.1", port: int = 9001) -> None:
     handler = _handler_for(policy)
     server = ThreadingHTTPServer((host, port), handler)
-    print(f"npc policy server listening on http://{host}:{port}", flush=True)
+    print(f"npc player server listening on http://{host}:{port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -19,9 +20,9 @@ def run_policy_server(policy: NpcPolicy, *, host: str = "127.0.0.1", port: int =
         server.server_close()
 
 
-def _handler_for(policy: NpcPolicy) -> type[BaseHTTPRequestHandler]:
-    class PolicyHandler(BaseHTTPRequestHandler):
-        server_version = "GuandanNpcPolicy/0.1"
+def _handler_for(policy: Player) -> type[BaseHTTPRequestHandler]:
+    class PlayerHandler(BaseHTTPRequestHandler):
+        server_version = "GuandanNpcPlayer/0.1"
 
         def do_POST(self) -> None:
             try:
@@ -53,4 +54,4 @@ def _handler_for(policy: NpcPolicy) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-    return PolicyHandler
+    return PlayerHandler

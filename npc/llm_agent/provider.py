@@ -7,8 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from client.api import ActionRequest, JsonObject
-from npc.dummy_bot.policy import DummyBotPolicy
+from client.types import ActionRequest, JsonObject
+from common.log import trace_event
+from npc.dummy_bot.player import DummyBotPlayer
 from npc.llm_agent.models import (
     ClaudeMessagesModelClient,
     CodexCliModelClient,
@@ -30,7 +31,7 @@ class DeterministicLlmProvider:
     """Dependency-free provider used for tests and local dry runs."""
 
     def __init__(self) -> None:
-        self._fallback = DummyBotPolicy()
+        self._fallback = DummyBotPlayer()
 
     def choose_action(self, prompt: JsonObject) -> JsonObject:
         action_prompt = _dict(prompt.get("prompt")) or _prompt_from_table_context(_dict(prompt.get("table_context")))
@@ -101,11 +102,30 @@ class ModelBackedLlmProvider:
     def _complete_with_audit(self, purpose: str, request: ModelRequest, *, metadata: JsonObject) -> object:
         started_at = _utc_now()
         start = time.perf_counter()
+        trace_event(
+            "llm_provider.completion_started",
+            purpose=purpose,
+            metadata=metadata,
+            provider=type(self.model_client).__name__,
+            model=request.model,
+            timeout_seconds=request.timeout_seconds,
+            max_output_tokens=request.max_output_tokens,
+        )
         try:
             response = self.model_client.complete(request)
         except Exception as exc:
             completed_at = _utc_now()
             duration_ms = _elapsed_ms(start)
+            trace_event(
+                "llm_provider.completion_failed",
+                purpose=purpose,
+                metadata=metadata,
+                provider=type(self.model_client).__name__,
+                model=request.model,
+                timeout_seconds=request.timeout_seconds,
+                duration_ms=duration_ms,
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
             self._append_audit_entry(
                 purpose,
                 request,
@@ -116,6 +136,16 @@ class ModelBackedLlmProvider:
             raise
         completed_at = _utc_now()
         duration_ms = _elapsed_ms(start)
+        trace_event(
+            "llm_provider.completion_completed",
+            purpose=purpose,
+            metadata=metadata,
+            provider=type(self.model_client).__name__,
+            model=request.model,
+            timeout_seconds=request.timeout_seconds,
+            duration_ms=duration_ms,
+            content_chars=len(getattr(response, "content", "") or ""),
+        )
         self._append_audit_entry(
             purpose,
             request,

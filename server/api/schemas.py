@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.domain.events import CommandRejected, Event
-from server.domain.seats import Seat
+from server.domain.seats import Seat, Team
 from server.domain.state import MatchPhase
 from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
@@ -46,6 +46,7 @@ class PublicTableSnapshotSchema(BaseModel):
     finish_order: tuple[Seat, ...]
     event_seq: int
     current_level: str = "2"
+    level_by_team: dict[Team, str] = Field(default_factory=dict)
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None

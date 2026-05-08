@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
+from fastapi import Request
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from server.api.schemas import (
     AgentJoinRequest,
@@ -29,6 +31,12 @@ from server.api.schemas import (
     VersionResponse,
 )
 from server.api.websocket import register_websocket_routes
+from server.app.audit import (
+    audit_log_enabled,
+    make_audit_entry,
+    parse_json_body,
+    write_audit_entry,
+)
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
@@ -40,10 +48,62 @@ from server.services.public_events import public_events
 def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
     table_registry: dict[str, TableActor] = {} if tables is None else tables
     app = FastAPI(title="Guandan Server", version="0.1.0")
+    _register_audit_middleware(app)
     router = create_router(table_registry)
     app.include_router(router)
     register_websocket_routes(app, table_registry)
     return app
+
+
+def _register_audit_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def audit_http_request(request: Request, call_next: Any) -> Response:
+        if not audit_log_enabled():
+            return await call_next(request)
+
+        started_at = time.monotonic()
+        request_body = await request.body()
+        replayed_request = Request(request.scope, _receive_once(request_body))
+        response_body = b""
+        status = 500
+        try:
+            response = await call_next(replayed_request)
+            status = response.status_code
+            async for chunk in response.body_iterator:
+                response_body += chunk
+            return Response(
+                content=response_body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+                background=response.background,
+            )
+        finally:
+            write_audit_entry(
+                make_audit_entry(
+                    method=request.method,
+                    path=request.url.path,
+                    query=request.url.query,
+                    status=status,
+                    started_at=started_at,
+                    request_body=parse_json_body(request_body),
+                    response_body=parse_json_body(response_body),
+                    client=request.client,
+                )
+            )
+
+
+def _receive_once(body: bytes) -> Any:
+    sent = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
 
 
 def create_router(tables: dict[str, TableActor]) -> APIRouter:

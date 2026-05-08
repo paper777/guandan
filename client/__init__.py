@@ -1,23 +1,10 @@
-"""Shared command-line and HTTP clients for Guandan."""
-
-from client.api import (
-    ActionRequest,
-    GuandanClientError,
-    GuandanHttpClient,
-    GuandanNpcClient,
-    JsonHttpClient,
-    JsonObject,
-    NpcClientError,
-    NpcPolicy,
-)
+from client.http_client import GuandanClientError, GuandanHttpClient, JsonHttpClient
+from client.types import ActionRequest, JsonObject
 
 __all__ = [
     "ActionRequest",
     "GuandanClientError",
     "GuandanHttpClient",
-    "GuandanNpcClient",
     "JsonHttpClient",
     "JsonObject",
-    "NpcClientError",
-    "NpcPolicy",
 ]

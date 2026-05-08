@@ -5,7 +5,7 @@ from typing import Callable
 
 
 @dataclass(frozen=True, slots=True)
-class CliResult:
+class Result:
     exit_code: int
     output: str
 

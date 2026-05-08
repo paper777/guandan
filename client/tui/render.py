@@ -8,7 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from client.api import GuandanClientError, JsonObject
+from client.http_client import GuandanClientError
+from client.types import JsonObject
 from server.domain.seats import SEATS
 
 
@@ -86,7 +87,8 @@ def _public_snapshot_lines(
         header = f"{snapshot.get('phase', '-')} | Seat {viewer_seat} | Turn {current_turn}"
     if acting != current_turn:
         header += f" | Acting {acting}"
-    header += f" | Level {snapshot.get('current_level', '2')}"
+    header += f" | Deal {snapshot.get('deal_id', 0)}"
+    header += _level_summary(snapshot, viewer_seat)
 
     lines = [header]
     timer = format_timer(snapshot)
@@ -101,6 +103,31 @@ def _public_snapshot_lines(
     if finish_order:
         lines.append("Finish: " + " ".join(str(seat) for seat in finish_order))
     return lines
+
+
+def _level_summary(snapshot: JsonObject, viewer_seat: object = None) -> str:
+    levels = snapshot.get("level_by_team")
+    current_level = str(snapshot.get("current_level", "2"))
+    if not isinstance(levels, dict) or not levels:
+        return f" | Level Card {current_level}"
+    normalized = {str(team): str(level) for team, level in levels.items()}
+    viewer_team = _team_for_seat(viewer_seat)
+    if viewer_team is None:
+        ew = normalized.get("EW", current_level)
+        sn = normalized.get("SN", current_level)
+        return f" | Level Cards EW {ew} / SN {sn}"
+    opponent_team = "SN" if viewer_team == "EW" else "EW"
+    own_level = normalized.get(viewer_team, current_level)
+    opponent_level = normalized.get(opponent_team, current_level)
+    return f" | Level Card {own_level} | Opp Level Card {opponent_level}"
+
+
+def _team_for_seat(seat: object) -> str | None:
+    if str(seat) in {"E", "W"}:
+        return "EW"
+    if str(seat) in {"S", "N"}:
+        return "SN"
+    return None
 
 
 def _render_panel(lines: Iterable[str], *, title: str) -> str:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from npc.common.server import run_policy_server
-from npc.dummy_bot.policy import DummyBotPolicy
+from npc.dummy_bot.player import DummyBotPlayer
 
 
 def main() -> None:
@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=9001)
     args = parser.parse_args()
 
-    run_policy_server(DummyBotPolicy(), host=args.host, port=args.port)
+    run_policy_server(DummyBotPlayer(), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

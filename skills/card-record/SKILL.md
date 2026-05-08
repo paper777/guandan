@@ -1,11 +1,11 @@
 ---
 name: card-record
-description: Use when tracking visible Guandan cards with the repository's tools.card_recorder module, including match start, turn recording, unseen-card tracking, and match finish handling.
+description: Use when tracking visible Guandan cards with the repository's common.card_recorder module, including match start, turn recording, unseen-card tracking, and match finish handling.
 ---
 
 # Card Record
 
-Use `tools.card_recorder.CardRecorder` when the task needs a durable or testable record of cards that have become public during a Guandan match.
+Use `common.card_recorder.CardRecorder` when the task needs a durable or testable record of cards that have become public during a Guandan match.
 
 Core workflow:
 

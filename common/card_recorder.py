@@ -12,9 +12,7 @@ from server.domain.seats import SEATS, Seat
 class MatchCards:
     match_id: str
     match_finished: bool = False
-    seen_cards: dict[Seat, tuple[Card, ...]] = field(
-        default_factory=lambda: {seat: () for seat in SEATS}
-    )
+    seen_cards: dict[Seat, tuple[Card, ...]] = field(default_factory=lambda: {seat: () for seat in SEATS})
     unseen_cards: tuple[Card, ...] = DECK
 
 
@@ -107,3 +105,4 @@ class CardRecorder:
         already_seen = [card_id for card_id in card_ids if card_id not in unseen_ids]
         if already_seen:
             raise ValueError(f"card has already been seen: {already_seen[0]}")
+

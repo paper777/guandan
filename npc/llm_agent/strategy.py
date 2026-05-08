@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from client.api import JsonObject
+from client.types import JsonObject
 from npc.llm_agent.context import AgentRequestContext, rank, rank_value, suit
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
@@ -8,7 +9,7 @@ from server.domain.events import RejectCode
 from server.domain.reducer import reduce_command
 from server.domain.cards import Rank
 from server.domain.seats import SEATS, Seat, Team
-from server.domain.state import DealResult, MatchPhase, MatchState
+from server.domain.state import DealResult, MatchPhase, MatchState, ScoreState
 
 
 def player(seat: Seat) -> PlayerRef:
@@ -68,6 +69,40 @@ class ReducerTests(unittest.TestCase):
         self.assertEqual(state.deal.turn, Seat.EAST)
         self.assertEqual([event.type for event in result.events], ["MatchStarted", "DealStarted", "CardsDealt"])
         self.assertEqual(set(result.events[-1].payload["hands"]), {seat.value for seat in SEATS})
+
+    def test_start_match_after_match_complete_resets_levels_for_new_match(self) -> None:
+        state = started_state()
+        state = replace(
+            state,
+            phase=MatchPhase.MATCH_COMPLETE,
+            current_level=Rank.ACE,
+            last_deal_result=DealResult(
+                finish_order=(Seat.EAST, Seat.WEST, Seat.SOUTH, Seat.NORTH),
+                winning_team=Team.EAST_WEST,
+                advance_count=1,
+                previous_level=Rank.ACE,
+                next_level=Rank.ACE,
+                match_complete=True,
+            ),
+            scores=ScoreState(level_by_team={Team.EAST_WEST: Rank.ACE, Team.SOUTH_NORTH: Rank.SEVEN}),
+        )
+        for seat in SEATS:
+            result = reduce_command(state, JoinTable(player(seat), controller(seat), seat))
+            self.assertIsNone(result.rejection)
+            state = result.state
+            result = reduce_command(state, Ready(controller(seat).id, seat))
+            self.assertIsNone(result.rejection)
+            state = result.state
+
+        result = reduce_command(state, StartMatch(seed="next-match"))
+
+        self.assertIsNone(result.rejection)
+        self.assertEqual(result.state.phase, MatchPhase.PLAYING)
+        self.assertEqual(result.state.current_level, Rank.TWO)
+        self.assertEqual(result.state.scores.level_by_team[Team.EAST_WEST], Rank.TWO)
+        self.assertEqual(result.state.scores.level_by_team[Team.SOUTH_NORTH], Rank.TWO)
+        self.assertIsNone(result.state.last_deal_result)
+        self.assertEqual([event.type for event in result.events], ["MatchStarted", "DealStarted", "CardsDealt"])
         self.assertEqual(len(result.events[-1].payload["hands"][Seat.EAST.value]), 27)
 
     def test_rejects_play_from_unattached_controller(self) -> None:

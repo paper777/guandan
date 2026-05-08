@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 import tempfile
 
-from client.api import ActionRequest
+from client.types import ActionRequest
 from npc.llm_agent import LlmAgentConfig
 from npc.llm_agent import LlmAgentPlayer
 

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from server.app.main import TABLES, app
@@ -169,6 +172,43 @@ class AppTests(unittest.TestCase):
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-S"))
         self.assertEqual(status, 400)
+
+    def test_audit_log_records_request_response_with_private_fields_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            audit_path = Path(tmp) / "audit.jsonl"
+            with patch.dict(
+                "os.environ",
+                {"GUANDAN_AUDIT_LOG_PATH": str(audit_path), "GUANDAN_AUDIT_LOG_ENABLED": "1"},
+            ):
+                status, body = asyncio.run(call_app("POST", "/tables"))
+                self.assertEqual(status, 201)
+                table_id = body["table_id"]
+                for seat in ("E", "S", "W", "N"):
+                    status, _ = asyncio.run(
+                        call_app(
+                            "POST",
+                            f"/tables/{table_id}/join-human",
+                            {"seat": seat, "player_id": f"p-{seat}", "controller_id": f"c-{seat}"},
+                        )
+                    )
+                    self.assertEqual(status, 200)
+                    status, _ = asyncio.run(
+                        call_app("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": f"c-{seat}"})
+                    )
+                    self.assertEqual(status, 200)
+                status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start"))
+                self.assertEqual(status, 200)
+                status, _ = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-E"))
+                self.assertEqual(status, 200)
+
+            entries = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+
+        snapshot_entry = entries[-1]
+        self.assertEqual(snapshot_entry["request"]["method"], "GET")
+        self.assertEqual(snapshot_entry["request"]["path"], f"/tables/{table_id}/seats/E/snapshot")
+        self.assertEqual(snapshot_entry["request"]["query"], {"controller_id": "<redacted>"})
+        self.assertEqual(snapshot_entry["response"]["status"], 200)
+        self.assertEqual(snapshot_entry["response"]["body"]["hand"], "<redacted>")
 
     def test_start_rejects_client_seed_payload(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables"))

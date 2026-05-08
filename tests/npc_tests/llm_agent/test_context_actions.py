@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from client.api import ActionRequest
+from client.types import ActionRequest
 from npc.llm_agent.actions import validate_action
 from npc.llm_agent.context import AgentRequestContext
 

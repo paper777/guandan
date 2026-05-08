@@ -8,10 +8,10 @@ The server remains authoritative. The bot only proposes normal domain commands, 
 
 ## Layout
 
-- `client/`: shared CLI, Guandan table HTTP client, and NPC protocol request types.
+- `client/`: shared CLI, Guandan table HTTP client, table broker, and NPC protocol request types.
+- `db/player/`: player profiles, lineup selection, LLM config, and statistics persistence.
 - `npc/common/server.py`: generic HTTP policy server helper.
 - `npc/dummy_bot`: dummy behavior only, plus a thin runner that hosts the policy through `npc/common.server`.
-- `npc/broker`: owns all client/server interaction with the Guandan table API for out-of-process NPCs.
 - `server/`: contains only the authoritative game server and no NPC actor runtime.
 
 ## Behavior

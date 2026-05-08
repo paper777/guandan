@@ -4,10 +4,11 @@ import select
 import sys
 import time
 
-from client.api import GuandanClientError, GuandanHttpClient, JsonObject
-from client.cli_app.render import RANK_SORT_ORDER, SUIT_INPUT_ALIASES, format_card_id, sort_card_ids
-from client.cli_app.session import CliSession
-from client.cli_app.types import InputFn
+from client.http_client import GuandanClientError, GuandanHttpClient
+from client.types import JsonObject
+from client.tui.render import RANK_SORT_ORDER, SUIT_INPUT_ALIASES, format_card_id, sort_card_ids
+from client.session import Session
+from client.tui.types import InputFn
 
 
 def read_command(input_fn: InputFn, prompt: str, deadline_epoch_ms: int | None) -> str | None:
@@ -36,7 +37,7 @@ def read_stdin_with_deadline(prompt: str, deadline_epoch_ms: int) -> str | None:
 
 def submit_human_command(
     client: GuandanHttpClient,
-    session: CliSession,
+    session: Session,
     command: str,
     seat_snapshot: JsonObject | None = None,
 ) -> JsonObject:

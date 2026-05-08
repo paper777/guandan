@@ -48,6 +48,7 @@ class SnapshotTests(unittest.TestCase):
         snapshot = public_snapshot(state)
 
         self.assertEqual(snapshot.hand_counts[Seat.EAST], 27)
+        self.assertEqual(snapshot.level_by_team, state.scores.level_by_team)
         self.assertFalse(hasattr(snapshot, "hands"))
 
     def test_seat_snapshot_exposes_only_attached_seat_hand(self) -> None:

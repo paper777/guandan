@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from client.api import GuandanHttpClient
+from client.http_client import GuandanHttpClient
 
 
 class ClientTests(unittest.TestCase):

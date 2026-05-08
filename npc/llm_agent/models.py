@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
-from client.api import JsonObject
+from client.types import JsonObject
+from common.log import elapsed_ms, trace_event
 
 
 HttpTransport = Callable[[str, JsonObject, JsonObject, float], JsonObject]
@@ -169,20 +171,54 @@ class DoubaoChatModelClient(ModelClient):
 
 
 def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_seconds: float) -> JsonObject:
+    started = time.perf_counter()
+    trace_event(
+        "llm_model.http_started",
+        url=url,
+        model=payload.get("model"),
+        timeout_seconds=timeout_seconds,
+    )
     request = Request(
         url,
         data=json.dumps(payload).encode(),
         headers={str(key): str(value) for key, value in headers.items()},
         method="POST",
     )
-    with urlopen(request, timeout=timeout_seconds) as response:
-        raw = json.loads(response.read().decode())
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            raw = json.loads(response.read().decode())
+    except Exception as exc:
+        trace_event(
+            "llm_model.http_failed",
+            url=url,
+            model=payload.get("model"),
+            timeout_seconds=timeout_seconds,
+            duration_ms=elapsed_ms(started),
+            error={"type": type(exc).__name__, "message": str(exc)},
+        )
+        raise
     if not isinstance(raw, dict):
         raise ValueError("model API returned a non-object JSON response")
+    trace_event(
+        "llm_model.http_completed",
+        url=url,
+        model=payload.get("model"),
+        timeout_seconds=timeout_seconds,
+        duration_ms=elapsed_ms(started),
+    )
     return raw
 
 
 def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, working_dir: Path | None) -> str:
+    started = time.perf_counter()
+    trace_event(
+        "llm_model.codex_exec_started",
+        command=command[:6],
+        model=_command_model(command),
+        timeout_seconds=timeout_seconds,
+        working_dir=str(working_dir) if working_dir is not None else None,
+        prompt_chars=len(prompt),
+    )
     with tempfile.NamedTemporaryFile(prefix="guandan-codex-", suffix=".txt", delete=False) as tmp:
         output_path = Path(tmp.name)
     try:
@@ -198,9 +234,36 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         )
         if completed.returncode != 0:
             message = completed.stderr.strip() or completed.stdout.strip() or f"codex exited {completed.returncode}"
+            trace_event(
+                "llm_model.codex_exec_failed",
+                model=_command_model(command),
+                timeout_seconds=timeout_seconds,
+                duration_ms=elapsed_ms(started),
+                returncode=completed.returncode,
+                stderr_chars=len(completed.stderr or ""),
+                stdout_chars=len(completed.stdout or ""),
+                error={"type": "RuntimeError", "message": message},
+            )
             raise RuntimeError(message)
         content = output_path.read_text(encoding="utf-8").strip()
-        return content or completed.stdout.strip()
+        result = content or completed.stdout.strip()
+        trace_event(
+            "llm_model.codex_exec_completed",
+            model=_command_model(command),
+            timeout_seconds=timeout_seconds,
+            duration_ms=elapsed_ms(started),
+            content_chars=len(result),
+        )
+        return result
+    except subprocess.TimeoutExpired as exc:
+        trace_event(
+            "llm_model.codex_exec_failed",
+            model=_command_model(command),
+            timeout_seconds=timeout_seconds,
+            duration_ms=elapsed_ms(started),
+            error={"type": type(exc).__name__, "message": str(exc)},
+        )
+        raise
     finally:
         try:
             output_path.unlink()
@@ -256,6 +319,16 @@ def parse_json_object(text: str) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError("model returned a non-object JSON value")
     return value
+
+
+def _command_model(command: list[str]) -> str | None:
+    try:
+        index = command.index("--model")
+    except ValueError:
+        return None
+    if index + 1 >= len(command):
+        return None
+    return command[index + 1]
 
 
 def _strip_json_fences(text: str) -> str:

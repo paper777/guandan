@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import getpass
+import io
 import json
 import tempfile
 import unittest
+import asyncio
+from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import urlencode, urlsplit
+from unittest.mock import patch
 
-from client.api import GuandanClientError
+from client.http_client import GuandanClientError, GuandanHttpClient
 from client.cli import (
-    CliSession,
+    Session,
     drive_bot_turns,
     format_card_id,
     format_command_response,
@@ -21,6 +27,8 @@ from client.cli import (
     resolve_card_inputs,
     run_cli,
 )
+from client.session import prepare_default_table
+from server.app.main import TABLES, app
 
 
 class FakeClient:
@@ -143,6 +151,7 @@ class FakeClient:
             "current_turn": self.current_turn,
             "acting_seat": self.current_turn,
             "current_level": "2",
+            "level_by_team": {"EW": "2", "SN": "3"},
             "current_trick": self.current_trick,
             "action_deadline_epoch_ms": self.action_deadline_epoch_ms,
             "finish_order": [],
@@ -150,7 +159,122 @@ class FakeClient:
         }
 
 
-class CliTests(unittest.TestCase):
+def _write_player_storage(root: Path, profiles: list[dict[str, object]]) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    directories: list[str] = []
+    profile_keys = {"id", "profile_id", "display_name", "name", "kind", "personality"}
+    llm_keys = {
+        "provider_name",
+        "model_name",
+        "api_base_url",
+        "timeout_seconds",
+        "temperature",
+        "max_output_tokens",
+        "memory_compaction_char_limit",
+        "memory_recent_deal_scan_limit",
+        "memory_max_output_tokens",
+        "codex_binary",
+        "codex_working_dir",
+    }
+    stat_keys = {
+        "deal_count",
+        "deal_wins",
+        "deal_win_rate",
+        "score",
+        "match_count",
+        "match_wins",
+        "match_win_rate",
+    }
+    for profile in profiles:
+        display_name = str(profile.get("display_name") or profile.get("name") or "player")
+        directory = str(profile.get("directory") or display_name.replace(" ", "-"))
+        directories.append(directory)
+        player_dir = root / directory
+        player_dir.mkdir(parents=True, exist_ok=True)
+        profile_payload = {key: value for key, value in profile.items() if key in profile_keys}
+        llm_payload = {key: value for key, value in profile.items() if key in llm_keys}
+        stat_payload = {key: value for key, value in profile.items() if key in stat_keys}
+        (player_dir / "profile.json").write_text(json.dumps(profile_payload), encoding="utf-8")
+        (player_dir / "llm_config.json").write_text(json.dumps(llm_payload), encoding="utf-8")
+        (player_dir / "statistics.json").write_text(json.dumps(stat_payload), encoding="utf-8")
+        (player_dir / "actions.json").write_text("[]", encoding="utf-8")
+        (player_dir / "memory.json").write_text("{}", encoding="utf-8")
+    (root / "players.json").write_text(json.dumps({"players": directories}), encoding="utf-8")
+    return root
+
+
+def _play_args(**overrides):
+    values = {
+        "table_id": None,
+        "player_id": None,
+        "controller_id": None,
+        "display_name": None,
+        "player_mode": "human",
+        "npc_lineup": "mixed",
+        "npc_player_config": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _asgi_transport(method, path, body, query):
+    status, payload = asyncio.run(_call_app(method, path, body, query))
+    if status >= 400:
+        raise GuandanClientError(status, _error_message(payload), payload)
+    return payload
+
+
+async def _call_app(method, path, body, query):
+    messages = []
+    request_body = json.dumps(body or {}).encode()
+    parsed = urlsplit(path)
+    query_string = urlencode(query or {}).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": request_body, "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": parsed.path,
+            "raw_path": parsed.path.encode(),
+            "query_string": query_string,
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+    status = next(message["status"] for message in messages if message["type"] == "http.response.start")
+    raw_body = next(message["body"] for message in messages if message["type"] == "http.response.body")
+    return status, json.loads(raw_body.decode()) if raw_body else {}
+
+
+def _error_message(payload):
+    rejection = payload.get("rejection")
+    if isinstance(rejection, dict):
+        return f"{rejection.get('code', 'rejected')}: {rejection.get('message', '')}".rstrip()
+    return str(payload.get("detail") or payload.get("error") or "Guandan server request failed")
+
+
+class CommandLineClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.choose_seat = patch("client.session._choose_available_seat", return_value="E")
+        self.choose_seat.start()
+        self.addCleanup(self.choose_seat.stop)
+
+    def test_play_parser_rejects_removed_seat_argument(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            run_cli(["--seat", "S"], input_fn=lambda prompt: "quit", client=FakeClient())
+
     def test_default_play_creates_human_and_three_mixed_broker_agents(self) -> None:
         client = FakeClient()
 
@@ -161,20 +285,28 @@ class CliTests(unittest.TestCase):
         self.assertIn("PLAYING | Seat E | Turn E", result.output)
         login_name = getpass.getuser()
         self.assertIn(f"E {login_name} 3 (You)", result.output)
-        self.assertIn("S Jade 1", result.output)
-        self.assertIn("W River 1 (F)", result.output)
-        self.assertIn("N Atlas 1", result.output)
-        self.assertIn("codex-cli/gpt-5.5", result.output)
+        self.assertIn("Deal 0 | Level Card 2 | Opp Level Card 3", result.output)
+        self.assertIn("Jade 1", result.output)
+        self.assertIn("River 1", result.output)
+        self.assertIn("Atlas 1", result.output)
+        self.assertIn("codex-cli/", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", login_name), client.calls)
-        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
-        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
-        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
+        self.assertEqual({call[3] for call in join_agent_calls}, {"Jade", "River", "Atlas"})
         self.assertNotIn(("join_local_bot", "table-1", "S", "bot-S", "bot-controller-S", "Bot S"), client.calls)
         self.assertIn(("start", "table-1"), client.calls)
 
     def test_llm_player_mode_joins_selected_seat_as_agent_and_watches_private_hand(self) -> None:
         class LlmWatchClient(FakeClient):
+            def start(self, table_id):
+                response = super().start(table_id)
+                if self.calls.count(("start", table_id)) > 1:
+                    self.current_turn = None
+                    response["snapshot"] = self._snapshot()
+                return response
+
             def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
                 response = super().play_cards(table_id, seat, controller_id, card_ids, declared_type=declared_type)
                 self.phase = "MATCH_COMPLETE"
@@ -188,11 +320,7 @@ class CliTests(unittest.TestCase):
             raise AssertionError("LLM watch mode should not prompt for input")
 
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "players.json"
-            path.write_text(
-                json.dumps({"players": [{"seat": "E", "display_name": "Pilot", "kind": "llm"}]}),
-                encoding="utf-8",
-            )
+            path = _write_player_storage(Path(tmp), [{"display_name": "Pilot", "kind": "llm"}])
             result = run_cli(
                 [
                     "--player-mode",
@@ -216,35 +344,90 @@ class CliTests(unittest.TestCase):
         self.assertIn(("seat_snapshot", "table-1", "E", "agent-controller-E"), client.calls)
         self.assertIn(("play_cards", "table-1", "E", "agent-controller-E", ("D1-C-3",), None), client.calls)
 
+    def test_player_mode_sets_human_as_llm_witness(self) -> None:
+        class MatchCompleteClient(FakeClient):
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
+                if self.calls.count(("start", table_id)) == 1:
+                    self.phase = "MATCH_COMPLETE"
+                    events = [{"seq": 1, "type": "MatchEnded", "payload": {"winning_team": "EW"}}]
+                else:
+                    self.phase = "PLAYING"
+                    events = [{"seq": 2, "type": "MatchStarted", "payload": {"table_id": table_id}}]
+                self.current_turn = None
+                return {"events": events, "snapshot": self._snapshot()}
+
+        client = MatchCompleteClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_player_storage(Path(tmp), [{"display_name": "Pilot", "kind": "llm"}])
+
+            result = run_cli(
+                ["--player-mode", "llm", "--display-name", "Pilot", "--npc-player-config", str(path)],
+                input_fn=lambda prompt: "unused",
+                client=client,
+            )
+
+            session, _ = prepare_default_table(
+                MatchCompleteClient(),
+                _play_args(player_mode="llm", display_name="Pilot", npc_player_config=str(path)),
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Table table-1 | Watching E", result.output)
+        self.assertTrue(any(member.is_human for member in session.table.members_for("E").witnesses))
+
+    def test_llm_gossiper_can_advise_human_player(self) -> None:
+        client = FakeClient()
+        commands = iter(["quit"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_player_storage(
+                Path(tmp),
+                [
+                    {
+                        "display_name": "Advisor",
+                        "kind": "llm",
+                        "provider_name": "deterministic",
+                        "model_name": "advisor-model",
+                    }
+                ],
+            )
+
+            result = run_cli(
+                ["--gossiper-mode", "llm", "--npc-player-config", str(path)],
+                input_fn=lambda prompt: next(commands),
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Advice from Advisor Gossiper:", result.output)
+        self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", getpass.getuser()), client.calls)
+
     def test_llm_player_mode_uses_selected_seat_config_metadata(self) -> None:
         class MatchCompleteClient(FakeClient):
             def start(self, table_id):
                 self.calls.append(("start", table_id))
-                self.phase = "MATCH_COMPLETE"
+                if self.calls.count(("start", table_id)) == 1:
+                    self.phase = "MATCH_COMPLETE"
+                    events = [{"seq": 1, "type": "MatchEnded", "payload": {"winning_team": "EW"}}]
+                else:
+                    self.phase = "PLAYING"
+                    events = [{"seq": 2, "type": "MatchStarted", "payload": {"table_id": table_id}}]
                 self.current_turn = None
-                return {
-                    "events": [{"seq": 1, "type": "MatchEnded", "payload": {"winning_team": "EW"}}],
-                    "snapshot": self._snapshot(),
-                }
+                return {"events": events, "snapshot": self._snapshot()}
 
         client = MatchCompleteClient()
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "players.json"
-            path.write_text(
-                json.dumps(
+            path = _write_player_storage(
+                Path(tmp),
+                [
                     {
-                        "players": [
-                            {
-                                "seat": "E",
-                                "display_name": "Configured East",
-                                "kind": "llm",
-                                "provider_name": "deterministic",
-                                "model_name": "configured-model",
-                            }
-                        ]
+                        "display_name": "Configured East",
+                        "kind": "llm",
+                        "provider_name": "deterministic",
+                        "model_name": "configured-model",
                     }
-                ),
-                encoding="utf-8",
+                ],
             )
 
             result = run_cli(
@@ -256,6 +439,66 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn(("join_agent", "table-1", "E", "Pilot"), client.calls)
         self.assertIn("deterministic/configured-model", result.output)
+
+    def test_llm_player_mode_does_not_duplicate_watched_seatless_profile(self) -> None:
+        class MatchCompleteClient(FakeClient):
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
+                if self.calls.count(("start", table_id)) == 1:
+                    self.phase = "MATCH_COMPLETE"
+                    events = [{"seq": 1, "type": "MatchEnded", "payload": {"winning_team": "EW"}}]
+                else:
+                    self.phase = "PLAYING"
+                    events = [{"seq": 2, "type": "MatchStarted", "payload": {"table_id": table_id}}]
+                self.current_turn = None
+                return {"events": events, "snapshot": self._snapshot()}
+
+        client = MatchCompleteClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_player_storage(
+                Path(tmp),
+                [
+                    {"display_name": "Pilot", "kind": "llm"},
+                    {"display_name": "Jade", "kind": "dummy"},
+                    {"display_name": "River", "kind": "dummy"},
+                    {"display_name": "Atlas", "kind": "dummy"},
+                ],
+            )
+
+            with patch("client.session._choose_available_seat", return_value="S"):
+                result = run_cli(
+                    [
+                        "--player-mode",
+                        "llm",
+                        "--display-name",
+                        "Pilot",
+                        "--npc-player-config",
+                        str(path),
+                    ],
+                    input_fn=lambda prompt: "unused",
+                    client=client,
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"E", "S", "W", "N"})
+        first_match_joins = join_agent_calls[:4]
+        self.assertEqual([call[3] for call in first_match_joins].count("Pilot"), 1)
+        self.assertEqual({call[3] for call in first_match_joins}, {"Pilot", "Jade", "River", "Atlas"})
+
+    def test_llm_player_mode_with_single_profile_fills_real_server_table(self) -> None:
+        TABLES.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_player_storage(Path(tmp), [{"display_name": "Pilot", "kind": "llm"}])
+            args = _play_args(player_mode="llm", display_name="Pilot", npc_player_config=str(path))
+            client = GuandanHttpClient(transport=_asgi_transport)
+
+            session, snapshot = prepare_default_table(client, args)
+
+        self.assertEqual(snapshot["phase"], "PLAYING")
+        self.assertEqual(len(snapshot["seats"]), 4)
+        self.assertEqual(session.human_seat, "E")
+        self.assertEqual({player["display_name"] for player in snapshot["seats"].values()}, {"Pilot", "Jade", "River", "Atlas"})
 
     def test_human_play_readable_card_label_then_drives_bot_passes(self) -> None:
         client = FakeClient()
@@ -304,11 +547,7 @@ class CliTests(unittest.TestCase):
 
         client = RejectLlmPlayClient()
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "players.json"
-            path.write_text(
-                json.dumps({"players": [{"seat": "E", "display_name": "Pilot", "kind": "llm"}]}),
-                encoding="utf-8",
-            )
+            path = _write_player_storage(Path(tmp), [{"display_name": "Pilot", "kind": "llm"}])
 
             result = run_cli(
                 [
@@ -458,12 +697,13 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(output, "E timed out; server fallback passed and ended the trick. N leads next.")
 
-    def test_deal_complete_starts_next_deal_until_match_complete(self) -> None:
+    def test_deal_complete_starts_next_deal_then_restarts_after_match_complete(self) -> None:
         class DealCompleteClient(FakeClient):
             def start(self, table_id):
                 self.calls.append(("start", table_id))
                 self.event_seq += 1
-                if self.calls.count(("start", table_id)) == 1:
+                start_count = self.calls.count(("start", table_id))
+                if start_count == 1:
                     self.phase = "DEAL_COMPLETE"
                     self.current_turn = None
                     events = [
@@ -473,7 +713,7 @@ class CliTests(unittest.TestCase):
                             "payload": {"team": "EW", "previous_level": "2", "next_level": "3"},
                         }
                     ]
-                else:
+                elif start_count == 2:
                     self.phase = "MATCH_COMPLETE"
                     self.current_turn = None
                     events = [
@@ -483,6 +723,16 @@ class CliTests(unittest.TestCase):
                             "payload": {"winning_team": "EW"},
                         }
                     ]
+                else:
+                    self.phase = "PLAYING"
+                    self.current_turn = None
+                    events = [
+                        {
+                            "seq": self.event_seq,
+                            "type": "MatchStarted",
+                            "payload": {"table_id": table_id},
+                        }
+                    ]
                 return {"events": events, "snapshot": self._snapshot()}
 
         client = DealCompleteClient()
@@ -490,9 +740,10 @@ class CliTests(unittest.TestCase):
         result = run_cli([], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(client.calls.count(("start", "table-1")), 2)
+        self.assertEqual(client.calls.count(("start", "table-1")), 3)
         self.assertIn("match ended; winner EW", result.output)
-        self.assertIn("MATCH_COMPLETE | Seat E | Turn -", result.output)
+        self.assertIn("Seat roles rotated for next match:", result.output)
+        self.assertIn("Match 2 started.", result.output)
 
     def test_human_tribute_command_submits_resolved_card(self) -> None:
         class TributeClient(FakeClient):
@@ -544,9 +795,9 @@ class CliTests(unittest.TestCase):
         result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
-        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
-        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
+        self.assertEqual({call[3] for call in join_agent_calls}, {"Jade", "River", "Atlas"})
 
     def test_cli_llm_lineup_uses_named_llm_players(self) -> None:
         client = FakeClient()
@@ -554,24 +805,19 @@ class CliTests(unittest.TestCase):
         result = run_cli(["--npc-lineup", "llm"], input_fn=lambda prompt: "quit", client=client)
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(("join_agent", "table-1", "S", "Jade"), client.calls)
-        self.assertIn(("join_agent", "table-1", "W", "River"), client.calls)
-        self.assertIn(("join_agent", "table-1", "N", "Atlas"), client.calls)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
+        self.assertEqual({call[3] for call in join_agent_calls}, {"Jade", "River", "Atlas"})
 
     def test_cli_uses_custom_npc_player_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "players.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "players": [
-                            {"seat": "S", "display_name": "South Config", "kind": "dummy"},
-                            {"seat": "W", "display_name": "West Config", "kind": "dummy"},
-                            {"seat": "N", "display_name": "North Config", "kind": "dummy"},
-                        ]
-                    }
-                ),
-                encoding="utf-8",
+            path = _write_player_storage(
+                Path(tmp),
+                [
+                    {"display_name": "South Config", "kind": "dummy"},
+                    {"display_name": "West Config", "kind": "dummy"},
+                    {"display_name": "North Config", "kind": "dummy"},
+                ],
             )
             client = FakeClient()
 
@@ -579,12 +825,12 @@ class CliTests(unittest.TestCase):
                 ["--npc-player-config", str(path), "--npc-lineup", "mixed"],
                 input_fn=lambda prompt: "quit",
                 client=client,
-            )
+        )
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(("join_agent", "table-1", "S", "South Config"), client.calls)
-        self.assertIn(("join_agent", "table-1", "W", "West Config"), client.calls)
-        self.assertIn(("join_agent", "table-1", "N", "North Config"), client.calls)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
+        self.assertEqual({call[3] for call in join_agent_calls}, {"South Config", "West Config", "North Config"})
 
     def test_card_formatter_hides_first_deck_and_uses_suit_emoji(self) -> None:
         self.assertEqual(format_card_id("D1-S-3"), "♠️ 3")
@@ -635,7 +881,7 @@ class CliTests(unittest.TestCase):
 
         snapshot = drive_bot_turns(
             client,
-            CliSession("table-1", "E", "human-controller-E", RaceBroker(), {}),
+            Session("table-1", "E", "human-controller-E", RaceBroker(), {}),
             client._snapshot(),
             output.append,
             4,

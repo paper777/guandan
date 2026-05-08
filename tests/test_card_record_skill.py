@@ -10,7 +10,7 @@ class CardRecordSkillTests(unittest.TestCase):
 
         self.assertTrue(text.startswith("---\nname: card-record\n"))
         self.assertIn("description:", text)
-        self.assertIn("tools.card_recorder.CardRecorder", text)
+        self.assertIn("common.card_recorder.CardRecorder", text)
         self.assertIn("Never infer hidden cards", text)
 
 

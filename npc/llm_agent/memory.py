@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from typing import Protocol
 
-from client.api import JsonObject
+from client.types import JsonObject
 from npc.llm_agent.prompts import (
     MEMORY_RULE_CONTEXT,
     MEMORY_PLAYER_ANALYSIS_PROMPT,

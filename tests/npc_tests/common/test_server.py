@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from client.api import ActionRequest
+from client.types import ActionRequest
 
 
 class ActionRequestTests(unittest.TestCase):

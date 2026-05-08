@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from server.domain.cards import CARD_BY_ID, Rank, is_red_heart_level_card
 from server.domain.comparator import RankContext
 from server.domain.controllers import ControllerCapability
 from server.domain.hand_types import PlayedHand
-from server.domain.seats import Seat
+from server.domain.seats import Seat, Team
 from server.domain.state import MatchPhase, MatchState, TributeObligation
 
 
@@ -29,6 +29,9 @@ class PublicTableSnapshot:
     finish_order: tuple[Seat, ...]
     event_seq: int
     current_level: Rank = Rank.TWO
+    level_by_team: dict[Team, Rank] = field(
+        default_factory=lambda: {Team.EAST_WEST: Rank.TWO, Team.SOUTH_NORTH: Rank.TWO}
+    )
     action_deadline_epoch_ms: int | None = None
     action_timeout_seconds: int = 45
     acting_seat: Seat | None = None
@@ -82,6 +85,7 @@ def public_snapshot(
         hand_counts=hand_counts,
         current_turn=current_turn,
         current_level=state.current_level,
+        level_by_team=dict(state.scores.level_by_team),
         finish_order=finish_order,
         event_seq=state.event_seq,
         action_deadline_epoch_ms=action_deadline_epoch_ms,

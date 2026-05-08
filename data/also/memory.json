@@ -1,0 +1,32 @@
+{
+  "last_memory_deal_seq": 443,
+  "play_style": "balanced",
+  "player_name": "also",
+  "player_profiles": {},
+  "score": {
+    "deals_played": 2,
+    "last_finish_order": [
+      "E",
+      "W",
+      "S",
+      "N"
+    ],
+    "level_by_team": {
+      "EW": "5"
+    },
+    "wins": 1
+  },
+  "seat": "N",
+  "techniques": {
+    "level1": [],
+    "level2": {
+      "bomb_usage": [],
+      "combo_removal": [],
+      "defensive_card_formation": [],
+      "offensive_card_formation": [],
+      "others": [],
+      "team_coordination": []
+    }
+  },
+  "updated_at": "2026-05-08T01:16:55.792807+00:00"
+}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from client.cli_app.app import (
+from client.app import (
     DEFAULT_BASE_URL,
     InputFn,
     OutputFn,
@@ -9,7 +9,7 @@ from client.cli_app.app import (
     main,
     run_cli,
 )
-from client.cli_app.commands import (
+from client.tui.commands import (
     normalize_rank,
     normalized_card_label,
     read_command,
@@ -18,7 +18,7 @@ from client.cli_app.commands import (
     resolve_card_label,
     submit_human_command,
 )
-from client.cli_app.render import (
+from client.tui.render import (
     SUIT_EMOJI,
     SUIT_INPUT_ALIASES,
     card_sort_key,
@@ -40,26 +40,26 @@ from client.cli_app.render import (
     help_text,
     sort_card_ids,
 )
-from client.cli_app.session import CliSession, prepare_default_table
-from client.cli_app.state_machine import (
-    CliMachineState,
-    CliStateMachine,
+from client.session import Session, prepare_default_table
+from client.state_machine import (
+    MachineState,
+    StateMachine,
     drive_bot_turns,
     input_deadline_epoch_ms,
     refresh_after_input_timeout,
     snapshot_acting_seat,
 )
-from client.cli_app.types import CliResult
+from client.tui.types import Result
 
 
 __all__ = [
     "DEFAULT_BASE_URL",
-    "CliMachineState",
-    "CliResult",
-    "CliSession",
-    "CliStateMachine",
     "InputFn",
+    "MachineState",
     "OutputFn",
+    "Result",
+    "Session",
+    "StateMachine",
     "SUIT_EMOJI",
     "SUIT_INPUT_ALIASES",
     "_build_parser",

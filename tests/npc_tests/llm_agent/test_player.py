@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from client.api import ActionRequest
-from npc.broker.broker import NpcBroker
-from npc.common.player import Player
+from client.types import ActionRequest
+from client.broker import NpcBroker
+from db.player import Player
 from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 
