@@ -8,7 +8,7 @@ from random import Random, SystemRandom
 
 from client.http_client import GuandanClientError, GuandanHttpClient
 from client.types import ActionRequest, JsonObject
-from common.log import deadline_fields, deadline_remaining_ms, elapsed_ms, trace_event
+from common.log import debug_event, deadline_fields, deadline_remaining_ms, elapsed_ms, error_event, trace_event
 from db.player.types import Player
 from db.player import (
     NPC_LINEUPS,
@@ -177,7 +177,7 @@ class NpcBroker:
             try:
                 action = broker_seat.policy.choose_action(request)
             except Exception as exc:
-                trace_event(
+                error_event(
                     "broker.action_failed",
                     table_id=self.table_id,
                     seat=broker_seat.seat,
@@ -187,7 +187,7 @@ class NpcBroker:
                     error={"type": type(exc).__name__, "message": str(exc)},
                 )
                 raise
-            trace_event(
+            debug_event(
                 "broker.action_selected",
                 table_id=self.table_id,
                 seat=broker_seat.seat,
@@ -245,7 +245,7 @@ class NpcBroker:
             response = self._submit_action_unchecked(broker_seat, action)
         except GuandanClientError as exc:
             _attach_rejected_action(exc, action)
-            trace_event(
+            error_event(
                 "broker.action_rejected",
                 table_id=self.table_id,
                 seat=broker_seat.seat,
@@ -256,7 +256,7 @@ class NpcBroker:
                 latest_snapshot=self._latest_public_snapshot(),
             )
             raise
-        trace_event(
+        debug_event(
             "broker.action_accepted",
             table_id=self.table_id,
             seat=broker_seat.seat,

@@ -8,11 +8,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from common.log import (
+    AUDIT_LOG_ENABLED_ENV,
+    AUDIT_LOG_PATH_ENV,
     TRACE_LOG_ENABLED_ENV,
     TRACE_LOG_PATH_ENV,
     deadline_remaining_ms,
+    make_audit_entry,
     redact_trace_payload,
     trace_event,
+    write_audit_entry,
 )
 
 
@@ -30,6 +34,7 @@ class TraceLogTests(unittest.TestCase):
 
             entry = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(entry["event"], "test.event")
+            self.assertEqual(entry["level"], "trace")
             self.assertEqual(entry["controller_id"], "<redacted>")
             self.assertEqual(entry["action"]["card_ids"], "<redacted>")
             self.assertEqual(entry["table_id"], "table-1")
@@ -51,6 +56,27 @@ class TraceLogTests(unittest.TestCase):
             redact_trace_payload({"outer": [{"hand": ["D1-S-3"], "safe": "ok"}]}),
             {"outer": [{"hand": "<redacted>", "safe": "ok"}]},
         )
+
+    def test_audit_entry_helpers_live_in_common_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit.jsonl"
+            with patch.dict(os.environ, {AUDIT_LOG_PATH_ENV: str(path), AUDIT_LOG_ENABLED_ENV: "1"}):
+                entry = make_audit_entry(
+                    method="GET",
+                    path="/tables/table-1/seats/E/snapshot",
+                    query="controller_id=c-E",
+                    status=200,
+                    started_at=0.0,
+                    request_body={},
+                    response_body={"hand": ["D1-S-3"], "public": {"event_seq": 1}},
+                    client=("testclient", 50000),
+                )
+                write_audit_entry(entry)
+
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(written["client"], "testclient")
+            self.assertEqual(written["request"]["query"], {"controller_id": "<redacted>"})
+            self.assertEqual(written["response"]["body"]["hand"], "<redacted>")
 
 
 if __name__ == "__main__":

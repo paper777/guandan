@@ -20,6 +20,7 @@ from client.tui.render import (
 )
 from client.session import Session
 from client.tui.types import InputFn, OutputFn
+from common.log import debug_event, error_event, trace_event
 
 
 ACTIVE_PHASES = {"PLAYING", "TRIBUTE"}
@@ -57,38 +58,73 @@ class StateMachine:
         self._last_recorded_event_seq: int | None = None
 
     def run(self, public_snapshot: JsonObject) -> JsonObject:
-        current = self._drive_bot_turns(public_snapshot)
-        while True:
-            state = self._machine_state(current)
-            if state == MachineState.FINISHED:
-                return self._finish(current)
-            if state == MachineState.DEAL_COMPLETE:
-                current = self._start_and_drive_next_deal()
-                continue
-            if state == MachineState.MATCH_COMPLETE:
-                current = self._start_and_drive_next_match(current)
-                continue
-            if state == MachineState.BOT_TURN:
-                updated = self._drive_bot_turns(current)
-                if updated == current:
-                    resolved = self._wait_for_timeout(current, waiting_label=str(snapshot_acting_seat(current)))
-                    if resolved == current:
-                        return current
-                    current = resolved
+        trace_event("client.state_machine.run_started", **_state_machine_log_fields(self.session, public_snapshot))
+        try:
+            current = self._drive_bot_turns(public_snapshot)
+            while True:
+                state = self._machine_state(current)
+                debug_event(
+                    "client.state_machine.state_evaluated",
+                    state=str(state),
+                    **_state_machine_log_fields(self.session, current),
+                )
+                if state == MachineState.FINISHED:
+                    finished = self._finish(current)
+                    debug_event(
+                        "client.state_machine.run_completed",
+                        reason="finished",
+                        **_state_machine_log_fields(self.session, finished),
+                    )
+                    return finished
+                if state == MachineState.DEAL_COMPLETE:
+                    current = self._start_and_drive_next_deal()
                     continue
-                current = updated
-                continue
-            if state == MachineState.HUMAN_TURN:
-                next_snapshot = self._handle_human_turn()
-                if next_snapshot is None:
+                if state == MachineState.MATCH_COMPLETE:
+                    current = self._start_and_drive_next_match(current)
+                    continue
+                if state == MachineState.BOT_TURN:
+                    updated = self._drive_bot_turns(current)
+                    if updated == current:
+                        resolved = self._wait_for_timeout(current, waiting_label=str(snapshot_acting_seat(current)))
+                        if resolved == current:
+                            debug_event(
+                                "client.state_machine.run_completed",
+                                reason="bot_waiting",
+                                **_state_machine_log_fields(self.session, current),
+                            )
+                            return current
+                        current = resolved
+                        continue
+                    current = updated
+                    continue
+                if state == MachineState.HUMAN_TURN:
+                    next_snapshot = self._handle_human_turn()
+                    if next_snapshot is None:
+                        debug_event(
+                            "client.state_machine.run_completed",
+                            reason="human_exit",
+                            **_state_machine_log_fields(self.session, current),
+                        )
+                        return current
+                    current = next_snapshot
+                    continue
+                waiting_label = str(snapshot_acting_seat(current) or current.get("phase", "-"))
+                updated = self._wait_for_timeout(current, waiting_label=waiting_label)
+                if updated == current:
+                    debug_event(
+                        "client.state_machine.run_completed",
+                        reason="waiting",
+                        **_state_machine_log_fields(self.session, current),
+                    )
                     return current
-                current = next_snapshot
-                continue
-            waiting_label = str(snapshot_acting_seat(current) or current.get("phase", "-"))
-            updated = self._wait_for_timeout(current, waiting_label=waiting_label)
-            if updated == current:
-                return current
-            current = updated
+                current = updated
+        except Exception as exc:
+            error_event(
+                "client.state_machine.run_failed",
+                **_state_machine_log_fields(self.session, public_snapshot),
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            raise
 
     def _machine_state(self, snapshot: JsonObject) -> MachineState:
         phase = snapshot.get("phase")
@@ -303,15 +339,36 @@ class StateMachine:
         return _COMMAND_NOT_HANDLED
 
     def _submit_human_turn(self, command: str, seat_snapshot: JsonObject) -> JsonObject:
+        trace_event(
+            "client.state_machine.human_command_started",
+            table_id=self.session.table_id,
+            seat=self.session.human_seat,
+            command=command_action(command, seat_snapshot),
+        )
         try:
             response = submit_human_command(self.client, self.session, command, seat_snapshot)
         except GuandanClientError as exc:
+            error_event(
+                "client.state_machine.human_command_failed",
+                table_id=self.session.table_id,
+                seat=self.session.human_seat,
+                command=command_action(command, seat_snapshot),
+                status=exc.status,
+                error_payload=exc.payload,
+            )
             self.emit(format_client_error(exc))
             rejected_cards = rejected_command_cards(command, seat_snapshot, exc)
             if rejected_cards:
                 self.emit(f"Rejected cards: {format_card_list(rejected_cards)}")
             return self.client.table_snapshot(self.session.table_id)
         self.emit(format_command_response(response).rstrip())
+        debug_event(
+            "client.state_machine.human_command_completed",
+            table_id=self.session.table_id,
+            seat=self.session.human_seat,
+            command=command_action(command, seat_snapshot),
+            event_seq=response.get("event_seq"),
+        )
         trigger_role_observers(self.session, self.session.human_seat, command_action(command, seat_snapshot), response)
         public_snapshot = response.get("snapshot") or self.client.table_snapshot(self.session.table_id)
         return self._drive_bot_turns(public_snapshot)
@@ -328,12 +385,25 @@ def drive_bot_turns(
 ) -> JsonObject:
     current = public_snapshot
     actions = 0
+    trace_event("client.state_machine.bot_drive_started", **_state_machine_log_fields(session, current))
     while current.get("phase") in ACTIVE_PHASES:
         seat = snapshot_acting_seat(current)
         if not isinstance(seat, str) or seat not in session.bot_broker.seats:
+            debug_event(
+                "client.state_machine.bot_drive_completed",
+                reason="no_broker_seat",
+                submitted_actions=actions,
+                **_state_machine_log_fields(session, current),
+            )
             return current
         if actions >= max_actions:
             emit("Stopped automatic bot play after reaching the safety limit.")
+            debug_event(
+                "client.state_machine.bot_drive_completed",
+                reason="safety_limit",
+                submitted_actions=actions,
+                **_state_machine_log_fields(session, current),
+            )
             return current
         try:
             if seat == watch_private_seat:
@@ -341,6 +411,13 @@ def drive_bot_turns(
                 emit(format_seat_snapshot(seat_snapshot, npc_metadata=session.npc_metadata).rstrip())
             submitted = session.bot_broker.poll_once_results(seat)
         except GuandanClientError as exc:
+            error_event(
+                "client.state_machine.bot_drive_failed",
+                seat=seat,
+                status=exc.status,
+                error_payload=exc.payload,
+                **_state_machine_log_fields(session, current),
+            )
             if client_error_code(exc) == "NOT_YOUR_TURN":
                 return client.table_snapshot(session.table_id)
             emit(format_client_error(exc))
@@ -349,12 +426,32 @@ def drive_bot_turns(
                 emit(f"Rejected cards: {format_card_list(rejected_cards)}")
             return client.table_snapshot(session.table_id)
         if not submitted:
+            debug_event(
+                "client.state_machine.bot_drive_completed",
+                reason="no_action",
+                seat=seat,
+                submitted_actions=actions,
+                **_state_machine_log_fields(session, current),
+            )
             return client.table_snapshot(session.table_id)
         for result in submitted:
             emit(format_command_response(result.response).rstrip())
             trigger_role_observers(session, seat, result.action, result.response)
         current = client.table_snapshot(session.table_id)
         actions += len(submitted)
+        debug_event(
+            "client.state_machine.bot_actions_submitted",
+            seat=seat,
+            submitted_actions=len(submitted),
+            total_submitted_actions=actions,
+            **_state_machine_log_fields(session, current),
+        )
+    debug_event(
+        "client.state_machine.bot_drive_completed",
+        reason="inactive_phase",
+        submitted_actions=actions,
+        **_state_machine_log_fields(session, current),
+    )
     return current
 
 
@@ -541,6 +638,14 @@ def wait_for_timeout_resolution(
     deadline = before.get("action_deadline_epoch_ms")
     if not isinstance(deadline, int):
         return before
+    trace_event(
+        "client.state_machine.timeout_wait_started",
+        table_id=before.get("table_id"),
+        phase=before.get("phase"),
+        acting_seat=snapshot_acting_seat(before),
+        event_seq=before.get("event_seq"),
+        deadline_epoch_ms=deadline,
+    )
     sleep_seconds = max(0.0, (deadline - int(time.time() * 1000)) / 1000)
     if sleep_seconds > 0:
         time.sleep(sleep_seconds)
@@ -550,10 +655,38 @@ def wait_for_timeout_resolution(
         current = client.table_snapshot(table_id)
         if _snapshot_changed_by_timeout(before, current):
             emit(format_timeout_fallback(before, current, kind=kind))
+            debug_event(
+                "client.state_machine.timeout_wait_completed",
+                reason="resolved",
+                table_id=table_id,
+                event_seq=current.get("event_seq"),
+                acting_seat=snapshot_acting_seat(current),
+                phase=current.get("phase"),
+            )
             return current
         if attempt < TIMEOUT_POLL_ATTEMPTS - 1:
             time.sleep(TIMEOUT_POLL_INTERVAL_SECONDS)
+    debug_event(
+        "client.state_machine.timeout_wait_completed",
+        reason="unresolved",
+        table_id=table_id,
+        event_seq=current.get("event_seq"),
+        acting_seat=snapshot_acting_seat(current),
+        phase=current.get("phase"),
+    )
     return current
+
+
+def _state_machine_log_fields(session: Session, snapshot: JsonObject) -> JsonObject:
+    return {
+        "table_id": session.table_id,
+        "human_seat": session.human_seat,
+        "phase": snapshot.get("phase"),
+        "deal_id": snapshot.get("deal_id"),
+        "event_seq": snapshot.get("event_seq"),
+        "acting_seat": snapshot_acting_seat(snapshot),
+        "bot_seats": sorted(session.bot_broker.seats),
+    }
 
 
 def _snapshot_changed_by_timeout(before: JsonObject, after: JsonObject) -> bool:

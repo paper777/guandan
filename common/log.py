@@ -6,11 +6,15 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 
 
 DEFAULT_TRACE_LOG_PATH = Path("data/guandan_trace.jsonl")
 TRACE_LOG_PATH_ENV = "GUANDAN_TRACE_LOG_PATH"
 TRACE_LOG_ENABLED_ENV = "GUANDAN_TRACE_LOG_ENABLED"
+DEFAULT_AUDIT_LOG_PATH = Path("data/server_audit.jsonl")
+AUDIT_LOG_PATH_ENV = "GUANDAN_AUDIT_LOG_PATH"
+AUDIT_LOG_ENABLED_ENV = "GUANDAN_AUDIT_LOG_ENABLED"
 REDACTED = "<redacted>"
 
 _PRIVATE_KEYS = {
@@ -42,6 +46,18 @@ def trace_log_path() -> Path:
 
 
 def trace_event(event: str, **fields: object) -> None:
+    log_event("trace", event, **fields)
+
+
+def debug_event(event: str, **fields: object) -> None:
+    log_event("debug", event, **fields)
+
+
+def error_event(event: str, **fields: object) -> None:
+    log_event("error", event, **fields)
+
+
+def log_event(level: str, event: str, **fields: object) -> None:
     """Append a best-effort structured trace event.
 
     Tracing must never change game behavior. File write errors are intentionally
@@ -52,6 +68,7 @@ def trace_event(event: str, **fields: object) -> None:
         return
     entry: JsonObject = {
         "recorded_at": datetime.now(UTC).isoformat(),
+        "level": level,
         "event": event,
     }
     entry.update(redact_trace_payload(fields))
@@ -104,3 +121,81 @@ def deadline_fields(deadline_epoch_ms: object) -> JsonObject:
         "deadline_remaining_ms": deadline_remaining_ms(deadline_epoch_ms),
     }
 
+
+def audit_log_enabled() -> bool:
+    value = os.environ.get(AUDIT_LOG_ENABLED_ENV, "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def audit_log_path() -> Path:
+    raw = os.environ.get(AUDIT_LOG_PATH_ENV, "").strip()
+    return Path(raw).expanduser() if raw else DEFAULT_AUDIT_LOG_PATH
+
+
+def make_audit_entry(
+    *,
+    method: str,
+    path: str,
+    query: str,
+    status: int,
+    started_at: float,
+    request_body: object,
+    response_body: object,
+    client: object = None,
+) -> JsonObject:
+    return {
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "duration_ms": round((time.monotonic() - started_at) * 1000, 3),
+        "client": client_host(client),
+        "request": {
+            "method": method,
+            "path": path,
+            "query": redact_audit_payload(query_dict(query)),
+            "body": redact_audit_payload(request_body),
+        },
+        "response": {
+            "status": status,
+            "body": redact_audit_payload(response_body),
+        },
+    }
+
+
+def write_audit_entry(entry: JsonObject, path: Path | None = None) -> None:
+    target = path or audit_log_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, default=str) + "\n")
+
+
+def parse_json_body(raw: bytes) -> object:
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"_raw_body_bytes": len(raw), "_parse_error": "non-json"}
+
+
+def redact_audit_payload(value: object) -> object:
+    return redact_trace_payload(value)
+
+
+def client_host(client: object) -> str | None:
+    if isinstance(client, tuple) and client:
+        return str(client[0])
+    host = getattr(client, "host", None)
+    return str(host) if host is not None else None
+
+
+def query_dict(query: str) -> JsonObject:
+    values: JsonObject = {}
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key in values:
+            current = values[key]
+            if isinstance(current, list):
+                current.append(value)
+            else:
+                values[key] = [current, value]
+        else:
+            values[key] = value
+    return values

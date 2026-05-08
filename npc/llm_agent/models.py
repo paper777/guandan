@@ -11,7 +11,7 @@ from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 from client.types import JsonObject
-from common.log import elapsed_ms, trace_event
+from common.log import debug_event, elapsed_ms, error_event, trace_event
 
 
 HttpTransport = Callable[[str, JsonObject, JsonObject, float], JsonObject]
@@ -177,6 +177,7 @@ def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_secon
         url=url,
         model=payload.get("model"),
         timeout_seconds=timeout_seconds,
+        request=_http_payload_log_fields(payload),
     )
     request = Request(
         url,
@@ -188,23 +189,26 @@ def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_secon
         with urlopen(request, timeout=timeout_seconds) as response:
             raw = json.loads(response.read().decode())
     except Exception as exc:
-        trace_event(
+        error_event(
             "llm_model.http_failed",
             url=url,
             model=payload.get("model"),
             timeout_seconds=timeout_seconds,
             duration_ms=elapsed_ms(started),
+            request=_http_payload_log_fields(payload),
             error={"type": type(exc).__name__, "message": str(exc)},
         )
         raise
     if not isinstance(raw, dict):
         raise ValueError("model API returned a non-object JSON response")
-    trace_event(
+    debug_event(
         "llm_model.http_completed",
         url=url,
         model=payload.get("model"),
         timeout_seconds=timeout_seconds,
         duration_ms=elapsed_ms(started),
+        request=_http_payload_log_fields(payload),
+        response=_http_response_log_fields(raw),
     )
     return raw
 
@@ -234,7 +238,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         )
         if completed.returncode != 0:
             message = completed.stderr.strip() or completed.stdout.strip() or f"codex exited {completed.returncode}"
-            trace_event(
+            error_event(
                 "llm_model.codex_exec_failed",
                 model=_command_model(command),
                 timeout_seconds=timeout_seconds,
@@ -247,7 +251,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
             raise RuntimeError(message)
         content = output_path.read_text(encoding="utf-8").strip()
         result = content or completed.stdout.strip()
-        trace_event(
+        debug_event(
             "llm_model.codex_exec_completed",
             model=_command_model(command),
             timeout_seconds=timeout_seconds,
@@ -256,7 +260,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         )
         return result
     except subprocess.TimeoutExpired as exc:
-        trace_event(
+        error_event(
             "llm_model.codex_exec_failed",
             model=_command_model(command),
             timeout_seconds=timeout_seconds,
@@ -319,6 +323,27 @@ def parse_json_object(text: str) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError("model returned a non-object JSON value")
     return value
+
+
+def _http_payload_log_fields(payload: JsonObject) -> JsonObject:
+    messages = payload.get("messages")
+    message_count = len(messages) if isinstance(messages, list) else None
+    return {
+        "model": payload.get("model"),
+        "temperature": payload.get("temperature"),
+        "max_output_tokens": payload.get("max_output_tokens") or payload.get("max_tokens"),
+        "instructions_chars": len(str(payload.get("instructions") or payload.get("system") or "")),
+        "input_chars": len(str(payload.get("input") or "")),
+        "message_count": message_count,
+    }
+
+
+def _http_response_log_fields(raw: JsonObject) -> JsonObject:
+    return {
+        "keys": sorted(str(key) for key in raw),
+        "output_text_chars": len(str(raw.get("output_text") or "")),
+        "choice_count": len(raw.get("choices")) if isinstance(raw.get("choices"), list) else None,
+    }
 
 
 def _command_model(command: list[str]) -> str | None:

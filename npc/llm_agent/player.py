@@ -6,7 +6,7 @@ from pathlib import Path
 
 from client.types import ActionRequest, JsonObject
 from db.player.types import Player
-from common.log import deadline_fields, deadline_remaining_ms, elapsed_ms, trace_event
+from common.log import debug_event, deadline_fields, deadline_remaining_ms, elapsed_ms, error_event, trace_event
 from npc.dummy_bot.player import DummyBotPlayer
 from npc.llm_agent.actions import validate_action
 from npc.llm_agent.config import LlmAgentConfig
@@ -75,52 +75,64 @@ class LlmAgentPlayer(Player):
             event_seq=public_value(request, "event_seq"),
             **deadline_fields(deadline_epoch_ms),
         )
-        context = self._prepare_decision(request)
-        trace_event(
-            "llm_player.prompt_prepared",
-            request_id=request.request_id,
-            table_id=snapshot_value(request, "table_id"),
-            seat=context.request_context.seat,
-            duration_ms=elapsed_ms(started),
-            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
-            recent_action_count=len(context.provider_prompt.get("recent_actions", [])),
-            hand_count=len(context.provider_prompt.get("snapshot", {}).get("hand", []))
-            if isinstance(context.provider_prompt.get("snapshot"), dict)
-            else None,
-        )
-        provider_action = self._request_provider(context.provider_prompt)
-        action, fallback_used = self._select_action(provider_action, context)
-        trace_event(
-            "llm_player.action_selected",
-            request_id=request.request_id,
-            table_id=snapshot_value(request, "table_id"),
-            seat=context.request_context.seat,
-            duration_ms=elapsed_ms(started),
-            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
-            action=action,
-            fallback_used=fallback_used,
-            provider_result_type=provider_action.get("type"),
-            provider_error=provider_action.get("message") if provider_action.get("type") == "error" else None,
-        )
+        try:
+            context = self._prepare_decision(request)
+            debug_event(
+                "llm_player.prompt_prepared",
+                request_id=request.request_id,
+                table_id=snapshot_value(request, "table_id"),
+                seat=context.request_context.seat,
+                duration_ms=elapsed_ms(started),
+                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+                recent_action_count=len(context.provider_prompt.get("recent_actions", [])),
+                hand_count=len(context.provider_prompt.get("snapshot", {}).get("hand", []))
+                if isinstance(context.provider_prompt.get("snapshot"), dict)
+                else None,
+            )
+            provider_action = self._request_provider(context.provider_prompt)
+            action, fallback_used = self._select_action(provider_action, context)
+            debug_event(
+                "llm_player.action_selected",
+                request_id=request.request_id,
+                table_id=snapshot_value(request, "table_id"),
+                seat=context.request_context.seat,
+                duration_ms=elapsed_ms(started),
+                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+                action=action,
+                fallback_used=fallback_used,
+                provider_result_type=provider_action.get("type"),
+                provider_error=provider_action.get("message") if provider_action.get("type") == "error" else None,
+            )
 
-        self._record_decision(context, action, provider_action, fallback_used)
-        self._update_memory(
-            context.memory_store,
-            context.memory,
-            provider_action,
-            request=request,
-            action_log=context.action_log,
-        )
-        trace_event(
-            "llm_player.decision_completed",
-            request_id=request.request_id,
-            table_id=snapshot_value(request, "table_id"),
-            seat=context.request_context.seat,
-            duration_ms=elapsed_ms(started),
-            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
-            fallback_used=fallback_used,
-        )
-        return action
+            self._record_decision(context, action, provider_action, fallback_used)
+            self._update_memory(
+                context.memory_store,
+                context.memory,
+                provider_action,
+                request=request,
+                action_log=context.action_log,
+            )
+            debug_event(
+                "llm_player.decision_completed",
+                request_id=request.request_id,
+                table_id=snapshot_value(request, "table_id"),
+                seat=context.request_context.seat,
+                duration_ms=elapsed_ms(started),
+                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+                fallback_used=fallback_used,
+            )
+            return action
+        except Exception as exc:
+            error_event(
+                "llm_player.decision_failed",
+                request_id=request.request_id,
+                table_id=snapshot_value(request, "table_id"),
+                seat=seat_from_request(request),
+                duration_ms=elapsed_ms(started),
+                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            raise
 
     def _prepare_decision(self, request: ActionRequest) -> DecisionContext:
         request_context = AgentRequestContext.from_request(request)
@@ -302,7 +314,7 @@ class LlmAgentPlayer(Player):
         try:
             action = self.provider.choose_action(prompt)
         except Exception as exc:
-            trace_event(
+            error_event(
                 "llm_player.provider_failed",
                 request_id=request_id,
                 table_id=table_context.get("table_id"),
@@ -314,7 +326,7 @@ class LlmAgentPlayer(Player):
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             return {"type": "error", "message": str(exc)}
-        trace_event(
+        debug_event(
             "llm_player.provider_completed",
             request_id=request_id,
             table_id=table_context.get("table_id"),

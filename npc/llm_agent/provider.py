@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from client.types import ActionRequest, JsonObject
-from common.log import trace_event
+from common.log import debug_event, error_event, trace_event
 from npc.dummy_bot.player import DummyBotPlayer
 from npc.llm_agent.models import (
     ClaudeMessagesModelClient,
@@ -110,13 +110,14 @@ class ModelBackedLlmProvider:
             model=request.model,
             timeout_seconds=request.timeout_seconds,
             max_output_tokens=request.max_output_tokens,
+            request=_request_log_fields(request),
         )
         try:
             response = self.model_client.complete(request)
         except Exception as exc:
             completed_at = _utc_now()
             duration_ms = _elapsed_ms(start)
-            trace_event(
+            error_event(
                 "llm_provider.completion_failed",
                 purpose=purpose,
                 metadata=metadata,
@@ -124,6 +125,7 @@ class ModelBackedLlmProvider:
                 model=request.model,
                 timeout_seconds=request.timeout_seconds,
                 duration_ms=duration_ms,
+                request=_request_log_fields(request),
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             self._append_audit_entry(
@@ -136,7 +138,7 @@ class ModelBackedLlmProvider:
             raise
         completed_at = _utc_now()
         duration_ms = _elapsed_ms(start)
-        trace_event(
+        debug_event(
             "llm_provider.completion_completed",
             purpose=purpose,
             metadata=metadata,
@@ -144,7 +146,8 @@ class ModelBackedLlmProvider:
             model=request.model,
             timeout_seconds=request.timeout_seconds,
             duration_ms=duration_ms,
-            content_chars=len(getattr(response, "content", "") or ""),
+            request=_request_log_fields(request),
+            response=_response_log_fields(response),
         )
         self._append_audit_entry(
             purpose,
@@ -260,6 +263,25 @@ def _timing(started_at: str, completed_at: str, duration_ms: float) -> JsonObjec
         "started_at": started_at,
         "completed_at": completed_at,
         "duration_ms": duration_ms,
+    }
+
+
+def _request_log_fields(request: ModelRequest) -> JsonObject:
+    return {
+        "model": request.model,
+        "temperature": request.temperature,
+        "timeout_seconds": request.timeout_seconds,
+        "max_output_tokens": request.max_output_tokens,
+        "system_prompt_chars": len(request.system_prompt),
+        "user_prompt_chars": len(request.user_prompt),
+    }
+
+
+def _response_log_fields(response: object) -> JsonObject:
+    raw = getattr(response, "raw", None)
+    return {
+        "content_chars": len(getattr(response, "content", "") or ""),
+        "raw_keys": sorted(str(key) for key in raw) if isinstance(raw, dict) else None,
     }
 
 

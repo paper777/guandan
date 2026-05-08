@@ -8,6 +8,18 @@ from fastapi import Request
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 
+from common.log import (
+    audit_log_enabled,
+    client_host,
+    debug_event,
+    error_event,
+    make_audit_entry,
+    parse_json_body,
+    query_dict,
+    trace_event,
+    trace_log_enabled,
+    write_audit_entry,
+)
 from server.api.schemas import (
     AgentJoinRequest,
     CommandResponse,
@@ -31,12 +43,6 @@ from server.api.schemas import (
     VersionResponse,
 )
 from server.api.websocket import register_websocket_routes
-from server.app.audit import (
-    audit_log_enabled,
-    make_audit_entry,
-    parse_json_body,
-    write_audit_entry,
-)
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
@@ -58,11 +64,24 @@ def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
 def _register_audit_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def audit_http_request(request: Request, call_next: Any) -> Response:
-        if not audit_log_enabled():
+        audit_enabled = audit_log_enabled()
+        if not audit_enabled and not trace_log_enabled():
             return await call_next(request)
 
         started_at = time.monotonic()
         request_body = await request.body()
+        parsed_request_body = parse_json_body(request_body)
+        request_log = {
+            "method": request.method,
+            "path": request.url.path,
+            "query": query_dict(request.url.query),
+            "body": parsed_request_body,
+        }
+        trace_event(
+            "server.http.request_received",
+            client=client_host(request.client),
+            request=request_log,
+        )
         replayed_request = Request(request.scope, _receive_once(request_body))
         response_body = b""
         status = 500
@@ -71,6 +90,21 @@ def _register_audit_middleware(app: FastAPI) -> None:
             status = response.status_code
             async for chunk in response.body_iterator:
                 response_body += chunk
+            parsed_response_body = parse_json_body(response_body)
+            log_response = {
+                "status": status,
+                "body": parsed_response_body,
+            }
+            log_fields = {
+                "client": client_host(request.client),
+                "duration_ms": _duration_ms(started_at),
+                "request": request_log,
+                "response": log_response,
+            }
+            if status >= 500:
+                error_event("server.http.response_sent", **log_fields)
+            else:
+                debug_event("server.http.response_sent", **log_fields)
             return Response(
                 content=response_body,
                 status_code=response.status_code,
@@ -78,19 +112,33 @@ def _register_audit_middleware(app: FastAPI) -> None:
                 media_type=response.media_type,
                 background=response.background,
             )
-        finally:
-            write_audit_entry(
-                make_audit_entry(
-                    method=request.method,
-                    path=request.url.path,
-                    query=request.url.query,
-                    status=status,
-                    started_at=started_at,
-                    request_body=parse_json_body(request_body),
-                    response_body=parse_json_body(response_body),
-                    client=request.client,
-                )
+        except Exception as exc:
+            error_event(
+                "server.http.request_failed",
+                client=client_host(request.client),
+                duration_ms=_duration_ms(started_at),
+                request=request_log,
+                error={"type": type(exc).__name__, "message": str(exc)},
             )
+            raise
+        finally:
+            if audit_enabled:
+                write_audit_entry(
+                    make_audit_entry(
+                        method=request.method,
+                        path=request.url.path,
+                        query=request.url.query,
+                        status=status,
+                        started_at=started_at,
+                        request_body=parsed_request_body,
+                        response_body=parse_json_body(response_body),
+                        client=request.client,
+                    )
+                )
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.monotonic() - started_at) * 1000, 3)
 
 
 def _receive_once(body: bytes) -> Any:
