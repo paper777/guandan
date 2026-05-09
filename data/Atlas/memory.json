@@ -144,6 +144,13 @@
         "techniques": [
           "When no legal same-type response exists and no bomb is available, pass cleanly rather than breaking structure."
         ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Prefer the lowest legal winning single when partner is not under immediate finish pressure.",
+        "techniques": [
+          "Prefer the lowest legal winning single when partner is not under immediate finish pressure."
+        ]
       }
     ],
     "level2": {
@@ -155,5 +162,5 @@
       "team_coordination": []
     }
   },
-  "updated_at": "2026-05-09T15:40:15.133156+00:00"
+  "updated_at": "2026-05-09T15:40:45.153343+00:00"
 }
