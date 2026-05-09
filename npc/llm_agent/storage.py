@@ -29,8 +29,7 @@ class JsonMemoryStore:
             return self.default_profile()
         profile = self.default_profile()
         profile.update(raw)
-        if not isinstance(profile.get("score"), dict):
-            profile["score"] = {}
+        profile.pop("score", None)
         legacy_skills = profile.pop("skills", None)
         profile["techniques"] = _normalize_techniques(profile.get("techniques"), legacy_skills)
         if not isinstance(profile.get("player_profiles"), dict):
@@ -47,7 +46,6 @@ class JsonMemoryStore:
             "player_name": self.player_name,
             "seat": self.seat,
             "play_style": "balanced",
-            "score": {"deals_played": 0, "wins": 0, "last_finish_order": []},
             "techniques": {
                 "level1": [],
                 "level2": {category: [] for category in TECHNIQUE_CATEGORIES},

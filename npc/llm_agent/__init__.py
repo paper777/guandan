@@ -1,6 +1,6 @@
 """LLM-backed NPC player with per-player filesystem memory."""
 
-from npc.llm_agent.config import LlmAgentConfig
+from npc.llm_agent.config import LlmAgentConfig, ModelSettings, ResolvedModelSettings
 from npc.llm_agent.models import (
     ClaudeMessagesModelClient,
     CodexCliModelClient,
@@ -29,8 +29,10 @@ __all__ = [
     "ModelClient",
     "ModelRequest",
     "ModelResponse",
+    "ModelSettings",
     "OpenAIResponsesModelClient",
     "PERSONALITY_FACTORS",
+    "ResolvedModelSettings",
     "normalize_personality",
     "personality_context",
 ]

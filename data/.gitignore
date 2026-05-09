@@ -1,2 +1,5 @@
 actions.json
 *.jsonl
+memory.json
+llm_config.json
+statistics.json

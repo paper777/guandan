@@ -120,9 +120,13 @@ class NpcBrokerTests(unittest.TestCase):
                     {
                         "provider_name": "codex-cli",
                         "codex_binary": "codex-test",
+                        "play": {
+                            "fast": {"model_name": "fast-model", "temperature": 0.1, "model_reasoning_effort": "low"},
+                            "pro": {"model_name": "pro-model", "max_output_tokens": 1600, "model_reasoning_effort": "high"},
+                        },
+                        "memory": {"model_name": "memory-model", "max_output_tokens": 678},
                         "memory_compaction_char_limit": 123,
                         "memory_recent_deal_scan_limit": 45,
-                        "memory_max_output_tokens": 678,
                     }
                 ),
                 encoding="utf-8",
@@ -142,14 +146,43 @@ class NpcBrokerTests(unittest.TestCase):
         self.assertIsInstance(broker.seats["W"].policy, LlmAgentPlayer)
         self.assertEqual(profiles[1].provider_name, "codex-cli")
         self.assertEqual(profiles[1].score, 7)
-        self.assertIsNone(profiles[1].model_name)
+        self.assertEqual(profiles[1].model_name, "fast-model")
         self.assertEqual(profiles[1].codex_binary, "codex-test")
-        self.assertEqual(broker.seats["W"].policy.config.model_name, "gpt-5.2")
-        self.assertEqual(broker.seats["W"].policy.config.timeout_seconds, 120.0)
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").provider_name, "codex-cli")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").timeout_seconds, 40.0)
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").model_name, "fast-model")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").temperature, 0.1)
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").model_reasoning_effort, "low")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("pro").model_name, "pro-model")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("pro").max_output_tokens, 1600)
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("pro").model_reasoning_effort, "high")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("memory").model_name, "memory-model")
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("memory").max_output_tokens, 678)
         self.assertEqual(broker.seats["W"].policy.config.personality, "defensive")
         self.assertEqual(broker.seats["W"].policy.config.memory_compaction_char_limit, 123)
         self.assertEqual(broker.seats["W"].policy.config.memory_recent_deal_scan_limit, 45)
         self.assertEqual(broker.seats["W"].policy.config.memory_max_output_tokens, 678)
+
+    def test_player_profile_timeout_config_reaches_llm_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / "players.json").write_text(json.dumps({"players": ["West-Custom"]}), encoding="utf-8")
+            west_dir = path / "West-Custom"
+            west_dir.mkdir()
+            (west_dir / "profile.json").write_text(
+                json.dumps({"display_name": "West Custom", "kind": "llm"}),
+                encoding="utf-8",
+            )
+            (west_dir / "llm_config.json").write_text(
+                json.dumps({"provider_name": "codex-cli", "play": {"fast": {"timeout_seconds": 55}}}),
+                encoding="utf-8",
+            )
+
+            broker = NpcBroker(FakeClient(), "table-1", player_db_path=path)
+            broker.add_players(("W",), lineup="mixed", shuffle_seed=1)
+
+        self.assertIsInstance(broker.seats["W"].policy, LlmAgentPlayer)
+        self.assertEqual(broker.seats["W"].policy.config.resolved_model("fast").timeout_seconds, 55.0)
 
     def test_result_events_update_player_database_stats(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

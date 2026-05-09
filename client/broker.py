@@ -235,12 +235,6 @@ class NpcBroker:
 
     def _submit_action(self, broker_seat: BrokerSeat, action: JsonObject) -> JsonObject:
         started = time.perf_counter()
-        trace_event(
-            "broker.action_submit_started",
-            table_id=self.table_id,
-            seat=broker_seat.seat,
-            action=action,
-        )
         try:
             response = self._submit_action_unchecked(broker_seat, action)
         except GuandanClientError as exc:

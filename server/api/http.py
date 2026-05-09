@@ -75,7 +75,6 @@ def _register_audit_middleware(app: FastAPI) -> None:
             "method": request.method,
             "path": request.url.path,
             "query": query_dict(request.url.query),
-            "body": parsed_request_body,
         }
         trace_event(
             "server.http.request_received",
@@ -90,10 +89,8 @@ def _register_audit_middleware(app: FastAPI) -> None:
             status = response.status_code
             async for chunk in response.body_iterator:
                 response_body += chunk
-            parsed_response_body = parse_json_body(response_body)
             log_response = {
                 "status": status,
-                "body": parsed_response_body,
             }
             log_fields = {
                 "client": client_host(request.client),

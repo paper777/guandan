@@ -10,17 +10,30 @@ from unittest.mock import patch
 from common.log import (
     AUDIT_LOG_ENABLED_ENV,
     AUDIT_LOG_PATH_ENV,
+    DEFAULT_AUDIT_LOG_PATH,
+    DEFAULT_LOG_DIR,
+    DEFAULT_TRACE_LOG_PATH,
     TRACE_LOG_ENABLED_ENV,
     TRACE_LOG_PATH_ENV,
+    audit_log_path,
     deadline_remaining_ms,
     make_audit_entry,
     redact_trace_payload,
     trace_event,
+    trace_log_path,
     write_audit_entry,
 )
 
 
 class TraceLogTests(unittest.TestCase):
+    def test_default_log_paths_live_under_data_log(self) -> None:
+        with patch.dict(os.environ, {TRACE_LOG_PATH_ENV: "", AUDIT_LOG_PATH_ENV: ""}, clear=False):
+            self.assertEqual(DEFAULT_LOG_DIR, Path("data/log"))
+            self.assertEqual(DEFAULT_TRACE_LOG_PATH, Path("data/log/guandan_trace.jsonl"))
+            self.assertEqual(DEFAULT_AUDIT_LOG_PATH, Path("data/log/server_audit.jsonl"))
+            self.assertEqual(trace_log_path(), DEFAULT_TRACE_LOG_PATH)
+            self.assertEqual(audit_log_path(), DEFAULT_AUDIT_LOG_PATH)
+
     def test_trace_event_writes_jsonl_and_redacts_private_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.jsonl"

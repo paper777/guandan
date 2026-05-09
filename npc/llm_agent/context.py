@@ -42,6 +42,7 @@ class AgentRequestContext:
             "event_seq": public_snapshot.get("event_seq"),
             "prompt_kind": request.prompt.get("kind"),
             "current_level": request.prompt.get("current_level") or public_snapshot.get("current_level"),
+            "level_by_team": public_snapshot.get("level_by_team", {}),
             "current_turn": public_snapshot.get("current_turn"),
             "acting_seat": public_snapshot.get("acting_seat") or public_snapshot.get("current_turn"),
             "hand_counts": public_snapshot.get("hand_counts", {}),

@@ -8,7 +8,7 @@ from pathlib import Path
 from client.types import ActionRequest
 from client.broker import NpcBroker
 from db.player import Player
-from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy
+from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, LlmAgentPolicy, ModelSettings
 from npc.llm_agent.prompts import SYSTEM_PROMPT
 
 
@@ -233,6 +233,53 @@ class LlmAgentPolicyTests(unittest.TestCase):
                 provider.prompts[-1]["table_context"]["current_trick"],
                 {"card_ids": ["D1-S-3"], "hand_type": "single", "last_play_seat": "E"},
             )
+
+    def test_provider_prompt_uses_fast_or_pro_model_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = StaticProvider({"type": "play_cards", "card_ids": ["D1-S-3"]})
+            policy = LlmAgentPlayer(
+                LlmAgentConfig(
+                    storage_dir=tmp,
+                    seat="S",
+                    play_fast=ModelSettings(model_name="fast-model", model_reasoning_effort="low"),
+                    play_pro=ModelSettings(model_name="pro-model", model_reasoning_effort="high"),
+                ),
+                provider=provider,
+            )
+
+            policy.choose_action(
+                ActionRequest(
+                    "r-fast",
+                    {"kind": "lead", "current_level": "2"},
+                    {
+                        "seat": "S",
+                        "hand": ["D1-S-3"],
+                        "public": {
+                            "current_level": "2",
+                            "current_turn": "S",
+                            "hand_counts": {"E": 20, "S": 20, "W": 20, "N": 20},
+                        },
+                    },
+                )
+            )
+            policy.choose_action(
+                ActionRequest(
+                    "r-ace",
+                    {"kind": "lead", "current_level": "A"},
+                    {
+                        "seat": "S",
+                        "hand": ["D1-S-3"],
+                        "public": {"current_level": "A", "level_by_team": {"EW": "A", "SN": "2"}},
+                    },
+                )
+            )
+
+        self.assertEqual(provider.prompts[0]["model"]["role"], "fast")
+        self.assertEqual(provider.prompts[0]["model"]["name"], "fast-model")
+        self.assertEqual(provider.prompts[0]["model"]["model_reasoning_effort"], "low")
+        self.assertEqual(provider.prompts[1]["model"]["role"], "pro")
+        self.assertEqual(provider.prompts[1]["model"]["name"], "pro-model")
+        self.assertEqual(provider.prompts[1]["model"]["model_reasoning_effort"], "high")
 
     def test_provider_prompt_splits_memory_into_techniques_and_other_player_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -579,8 +626,7 @@ class LlmAgentPolicyTests(unittest.TestCase):
             self.assertEqual(memory["techniques"]["level1"][0]["summary"], "Partner delivery worked.")
             self.assertIn("Jade", memory["player_profiles"])
             self.assertEqual(memory["player_profiles"]["Jade"]["latest_seat"], "S")
-            self.assertEqual(memory["score"]["deals_played"], 1)
-            self.assertEqual(memory["score"]["wins"], 1)
+            self.assertNotIn("score", memory)
 
     def test_broker_notifies_all_llm_agents_after_each_submitted_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

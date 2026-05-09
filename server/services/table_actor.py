@@ -227,16 +227,6 @@ class TableActor:
             return
         prompt_id = self._active_prompt.prompt_id
         delay = max(0.0, (self._active_prompt.deadline_epoch_ms - self._clock()) / 1000)
-        trace_event(
-            "server.timeout_scheduled",
-            table_id=self.table_id,
-            match_id=self.match_id,
-            seat=self._active_prompt.seat.value,
-            kind=self._active_prompt.kind,
-            prompt_id=prompt_id,
-            delay_seconds=round(delay, 3),
-            deadline_epoch_ms=self._active_prompt.deadline_epoch_ms,
-        )
         self._timeout_task = asyncio.create_task(self._timeout_after(prompt_id, delay))
 
     def _cancel_timeout_task(self) -> None:

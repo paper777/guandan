@@ -9,10 +9,11 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 
-DEFAULT_TRACE_LOG_PATH = Path("data/guandan_trace.jsonl")
+DEFAULT_LOG_DIR = Path("data/log")
+DEFAULT_TRACE_LOG_PATH = DEFAULT_LOG_DIR / "guandan_trace.jsonl"
 TRACE_LOG_PATH_ENV = "GUANDAN_TRACE_LOG_PATH"
 TRACE_LOG_ENABLED_ENV = "GUANDAN_TRACE_LOG_ENABLED"
-DEFAULT_AUDIT_LOG_PATH = Path("data/server_audit.jsonl")
+DEFAULT_AUDIT_LOG_PATH = DEFAULT_LOG_DIR / "server_audit.jsonl"
 AUDIT_LOG_PATH_ENV = "GUANDAN_AUDIT_LOG_PATH"
 AUDIT_LOG_ENABLED_ENV = "GUANDAN_AUDIT_LOG_ENABLED"
 REDACTED = "<redacted>"

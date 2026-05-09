@@ -32,16 +32,35 @@ class PlayerStatistics:
 
 
 @dataclass(frozen=True, slots=True)
-class LlmConfig:
+class LlmModelConfig:
     provider_name: str | None = None
-    model_name: str | None = None
     api_base_url: str | None = None
+    model_name: str | None = None
     timeout_seconds: float | None = None
     temperature: float | None = None
     max_output_tokens: int | None = None
+    model_reasoning_effort: str | None = None
+
+    def is_empty(self) -> bool:
+        return (
+            self.provider_name is None
+            and self.api_base_url is None
+            and self.model_name is None
+            and self.timeout_seconds is None
+            and self.temperature is None
+            and self.max_output_tokens is None
+            and self.model_reasoning_effort is None
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LlmConfig:
     memory_compaction_char_limit: int | None = None
     memory_recent_deal_scan_limit: int | None = None
     memory_max_output_tokens: int | None = None
+    play_fast: LlmModelConfig = field(default_factory=LlmModelConfig)
+    play_pro: LlmModelConfig = field(default_factory=LlmModelConfig)
+    memory_model: LlmModelConfig = field(default_factory=LlmModelConfig)
     codex_binary: str | None = None
     codex_working_dir: str | Path | None = None
 
@@ -59,11 +78,14 @@ class PlayerProfile:
 
     @property
     def provider_name(self) -> str | None:
-        return self.llm_config.provider_name
+        return self.llm_config.play_fast.provider_name
 
     @property
     def model_name(self) -> str | None:
-        return self.llm_config.model_name
+        return (
+            self.llm_config.play_fast.model_name
+            or self.llm_config.play_pro.model_name
+        )
 
     @property
     def codex_binary(self) -> str | None:

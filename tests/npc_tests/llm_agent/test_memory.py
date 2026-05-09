@@ -48,18 +48,27 @@ class FakeMemoryProvider:
 
 
 class LlmMemoryTests(unittest.TestCase):
-    def test_memory_store_migrates_legacy_skills_to_techniques(self) -> None:
+    def test_memory_store_migrates_legacy_skills_to_techniques_and_drops_score(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "memory.json"
-            path.write_text(json.dumps({"skills": ["Old skill"], "player_profiles": []}), encoding="utf-8")
+            path.write_text(
+                json.dumps({"skills": ["Old skill"], "player_profiles": [], "score": {"wins": 2}}),
+                encoding="utf-8",
+            )
             store = JsonMemoryStore(path, player_name="Jade", seat="S")
 
             memory = store.load()
 
             self.assertNotIn("skills", memory)
+            self.assertNotIn("score", memory)
             self.assertEqual(memory["techniques"]["level1"][0]["summary"], "Old skill")
             self.assertEqual(memory["techniques"]["level2"]["team_coordination"], [])
             self.assertEqual(memory["player_profiles"], {})
+
+    def test_memory_store_default_profile_has_no_score(self) -> None:
+        store = JsonMemoryStore(Path("memory.json"), player_name="Jade", seat="S")
+
+        self.assertNotIn("score", store.default_profile())
 
     def test_memory_agent_summarizes_profiles_and_compacts_by_category(self) -> None:
         provider = FakeMemoryProvider()

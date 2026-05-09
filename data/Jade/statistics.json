@@ -1,8 +1,8 @@
 {
-  "deal_count": 2,
-  "deal_wins": 1,
+  "deal_count": 6,
+  "deal_wins": 3,
   "deal_win_rate": 0.5,
-  "score": 0,
+  "score": -1,
   "match_count": 0,
   "match_wins": 0,
   "match_win_rate": 0.0

@@ -170,6 +170,8 @@ def _write_player_storage(root: Path, profiles: list[dict[str, object]]) -> Path
         "timeout_seconds",
         "temperature",
         "max_output_tokens",
+        "play",
+        "memory",
         "memory_compaction_char_limit",
         "memory_recent_deal_scan_limit",
         "memory_max_output_tokens",

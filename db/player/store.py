@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from random import Random, SystemRandom
 
-from db.player.types import LlmConfig, PlayerProfile, PlayerStatistics
+from db.player.types import LlmConfig, LlmModelConfig, PlayerProfile, PlayerStatistics
 from server.domain.cards import STANDARD_RANKS
 
 
@@ -147,15 +147,16 @@ def _profiles_from_items(items: list[object]) -> list[PlayerProfile]:
                 preferred_seat=preferred_seat,
                 personality=str(item.get("personality") or fallback.personality),
                 llm_config=LlmConfig(
-                    provider_name=_optional_str(item.get("provider_name")),
-                    model_name=_optional_str(item.get("model_name")),
-                    api_base_url=_optional_str(item.get("api_base_url")),
-                    timeout_seconds=_optional_float(item.get("timeout_seconds")),
-                    temperature=_optional_float(item.get("temperature")),
-                    max_output_tokens=_optional_int(item.get("max_output_tokens")),
-                    memory_compaction_char_limit=_optional_int(item.get("memory_compaction_char_limit")),
-                    memory_recent_deal_scan_limit=_optional_int(item.get("memory_recent_deal_scan_limit")),
-                    memory_max_output_tokens=_optional_int(item.get("memory_max_output_tokens")),
+                    memory_compaction_char_limit=_memory_int(
+                        item, "compaction_char_limit", "memory_compaction_char_limit"
+                    ),
+                    memory_recent_deal_scan_limit=_memory_int(
+                        item, "recent_deal_scan_limit", "memory_recent_deal_scan_limit"
+                    ),
+                    memory_max_output_tokens=_memory_int(item, "max_output_tokens", "memory_max_output_tokens"),
+                    play_fast=_play_model_config(item, "fast", include_flat=True),
+                    play_pro=_play_model_config(item, "pro"),
+                    memory_model=_memory_model_config(item),
                     codex_binary=_optional_str(item.get("codex_binary")),
                     codex_working_dir=_optional_str(item.get("codex_working_dir")),
                 ),
@@ -259,21 +260,118 @@ def profile_identity_to_json(profile: PlayerProfile) -> dict[str, object]:
 def llm_config_to_json(config: LlmConfig) -> dict[str, object]:
     payload: dict[str, object] = {}
     for key in (
-        "provider_name",
-        "model_name",
-        "api_base_url",
-        "timeout_seconds",
-        "temperature",
-        "max_output_tokens",
-        "memory_compaction_char_limit",
-        "memory_recent_deal_scan_limit",
-        "memory_max_output_tokens",
         "codex_binary",
         "codex_working_dir",
     ):
         value = getattr(config, key)
         if value is not None:
             payload[key] = str(value) if isinstance(value, Path) else value
+    play_payload: dict[str, object] = {}
+    fast = _model_config_to_json(config.play_fast)
+    pro = _model_config_to_json(config.play_pro)
+    if fast:
+        play_payload["fast"] = fast
+    if pro:
+        play_payload["pro"] = pro
+    if play_payload:
+        payload["play"] = play_payload
+
+    memory_model = _model_config_to_json(config.memory_model)
+    memory_payload: dict[str, object] = {}
+    if memory_model:
+        memory_payload.update(memory_model)
+    if config.memory_compaction_char_limit is not None:
+        memory_payload["compaction_char_limit"] = config.memory_compaction_char_limit
+    if config.memory_recent_deal_scan_limit is not None:
+        memory_payload["recent_deal_scan_limit"] = config.memory_recent_deal_scan_limit
+    if config.memory_max_output_tokens is not None and "max_output_tokens" not in memory_payload:
+        memory_payload["max_output_tokens"] = config.memory_max_output_tokens
+    if memory_payload:
+        payload["memory"] = memory_payload
+    return payload
+
+
+def _play_model_config(item: dict[str, object], role: str, *, include_flat: bool = False) -> LlmModelConfig:
+    play = item.get("play")
+    role_config = play.get(role) if isinstance(play, dict) else None
+    nested = _model_config_from_object(role_config)
+    if not include_flat:
+        return nested
+    legacy = LlmModelConfig(
+        provider_name=_optional_str(item.get("provider_name")),
+        api_base_url=_optional_str(item.get("api_base_url")),
+        model_name=_optional_str(item.get("model_name")),
+        timeout_seconds=_optional_float(item.get("timeout_seconds")),
+        temperature=_optional_float(item.get("temperature")),
+        max_output_tokens=_optional_int(item.get("max_output_tokens")),
+    )
+    return _merged_model_config(legacy, nested)
+
+
+def _memory_model_config(item: dict[str, object]) -> LlmModelConfig:
+    memory = item.get("memory")
+    nested = _model_config_from_object(memory)
+    legacy = LlmModelConfig(
+        model_name=_optional_str(item.get("memory_model_name")),
+        timeout_seconds=_optional_float(item.get("memory_timeout_seconds")),
+        temperature=_optional_float(item.get("memory_temperature")),
+        max_output_tokens=_optional_int(item.get("memory_max_output_tokens")),
+        model_reasoning_effort=_optional_str(item.get("memory_model_reasoning_effort")),
+    )
+    return _merged_model_config(legacy, nested)
+
+
+def _memory_int(item: dict[str, object], nested_key: str, legacy_key: str) -> int | None:
+    memory = item.get("memory")
+    if isinstance(memory, dict) and memory.get(nested_key) is not None:
+        return _optional_int(memory.get(nested_key))
+    return _optional_int(item.get(legacy_key))
+
+
+def _model_config_from_object(value: object) -> LlmModelConfig:
+    if not isinstance(value, dict):
+        return LlmModelConfig()
+    return LlmModelConfig(
+        provider_name=_optional_str(value.get("provider_name")),
+        api_base_url=_optional_str(value.get("api_base_url")),
+        model_name=_optional_str(value.get("model_name")),
+        timeout_seconds=_optional_float(value.get("timeout_seconds")),
+        temperature=_optional_float(value.get("temperature")),
+        max_output_tokens=_optional_int(value.get("max_output_tokens")),
+        model_reasoning_effort=_optional_str(value.get("model_reasoning_effort")),
+    )
+
+
+def _merged_model_config(base: LlmModelConfig, override: LlmModelConfig) -> LlmModelConfig:
+    return LlmModelConfig(
+        provider_name=override.provider_name if override.provider_name is not None else base.provider_name,
+        api_base_url=override.api_base_url if override.api_base_url is not None else base.api_base_url,
+        model_name=override.model_name if override.model_name is not None else base.model_name,
+        timeout_seconds=override.timeout_seconds if override.timeout_seconds is not None else base.timeout_seconds,
+        temperature=override.temperature if override.temperature is not None else base.temperature,
+        max_output_tokens=override.max_output_tokens if override.max_output_tokens is not None else base.max_output_tokens,
+        model_reasoning_effort=(
+            override.model_reasoning_effort
+            if override.model_reasoning_effort is not None
+            else base.model_reasoning_effort
+        ),
+    )
+
+
+def _model_config_to_json(config: LlmModelConfig) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for key in (
+        "provider_name",
+        "api_base_url",
+        "model_name",
+        "timeout_seconds",
+        "temperature",
+        "max_output_tokens",
+        "model_reasoning_effort",
+    ):
+        value = getattr(config, key)
+        if value is not None:
+            payload[key] = value
     return payload
 
 
@@ -434,9 +532,15 @@ _PROFILE_KEYS = {
     "timeout_seconds",
     "temperature",
     "max_output_tokens",
+    "play",
+    "memory",
     "memory_compaction_char_limit",
     "memory_recent_deal_scan_limit",
     "memory_max_output_tokens",
+    "memory_model_name",
+    "memory_timeout_seconds",
+    "memory_temperature",
+    "memory_model_reasoning_effort",
     "codex_binary",
     "codex_working_dir",
     "deal_count",

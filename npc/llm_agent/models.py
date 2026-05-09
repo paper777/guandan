@@ -24,8 +24,9 @@ class ModelRequest:
     user_prompt: str
     model: str
     temperature: float = 0.2
-    timeout_seconds: float = 3.0
+    timeout_seconds: float = 40.0
     max_output_tokens: int = 800
+    model_reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +74,8 @@ class CodexCliModelClient(ModelClient):
             request.model,
             "-",
         ]
+        if request.model_reasoning_effort:
+            command[2:2] = ["-c", f'model_reasoning_effort="{request.model_reasoning_effort}"']
         content = self.runner(command, prompt, request.timeout_seconds, self.working_dir)
         return ModelResponse(content=content, raw={"provider": "codex-cli", "content": content})
 
@@ -97,6 +100,8 @@ class OpenAIResponsesModelClient(ModelClient):
             "temperature": request.temperature,
             "max_output_tokens": request.max_output_tokens,
         }
+        if request.model_reasoning_effort:
+            payload["reasoning"] = {"effort": request.model_reasoning_effort}
         raw = self.transport(
             self.base_url,
             {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
@@ -170,6 +175,39 @@ class DoubaoChatModelClient(ModelClient):
         return ModelResponse(content=_chat_completion_text(raw), raw=raw)
 
 
+class GlmChatModelClient(ModelClient):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        transport: HttpTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.transport = transport or _post_json
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        payload: JsonObject = {
+            "model": request.model,
+            "messages": [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_prompt},
+            ],
+            "temperature": request.temperature,
+            "max_tokens": request.max_output_tokens,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+        }
+        raw = self.transport(
+            self.base_url,
+            {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            payload,
+            request.timeout_seconds,
+        )
+        return ModelResponse(content=_chat_completion_text(raw), raw=raw)
+
+
 def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_seconds: float) -> JsonObject:
     started = time.perf_counter()
     trace_event(
@@ -177,7 +215,6 @@ def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_secon
         url=url,
         model=payload.get("model"),
         timeout_seconds=timeout_seconds,
-        request=_http_payload_log_fields(payload),
     )
     request = Request(
         url,
@@ -207,8 +244,6 @@ def _post_json(url: str, headers: JsonObject, payload: JsonObject, timeout_secon
         model=payload.get("model"),
         timeout_seconds=timeout_seconds,
         duration_ms=elapsed_ms(started),
-        request=_http_payload_log_fields(payload),
-        response=_http_response_log_fields(raw),
     )
     return raw
 
@@ -219,6 +254,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         "llm_model.codex_exec_started",
         command=command[:6],
         model=_command_model(command),
+        model_reasoning_effort=_command_config_value(command, "model_reasoning_effort"),
         timeout_seconds=timeout_seconds,
         working_dir=str(working_dir) if working_dir is not None else None,
         prompt_chars=len(prompt),
@@ -241,6 +277,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
             error_event(
                 "llm_model.codex_exec_failed",
                 model=_command_model(command),
+                model_reasoning_effort=_command_config_value(command, "model_reasoning_effort"),
                 timeout_seconds=timeout_seconds,
                 duration_ms=elapsed_ms(started),
                 returncode=completed.returncode,
@@ -254,6 +291,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         debug_event(
             "llm_model.codex_exec_completed",
             model=_command_model(command),
+            model_reasoning_effort=_command_config_value(command, "model_reasoning_effort"),
             timeout_seconds=timeout_seconds,
             duration_ms=elapsed_ms(started),
             content_chars=len(result),
@@ -263,6 +301,7 @@ def _run_codex_exec(command: list[str], prompt: str, timeout_seconds: float, wor
         error_event(
             "llm_model.codex_exec_failed",
             model=_command_model(command),
+            model_reasoning_effort=_command_config_value(command, "model_reasoning_effort"),
             timeout_seconds=timeout_seconds,
             duration_ms=elapsed_ms(started),
             error={"type": type(exc).__name__, "message": str(exc)},
@@ -331,6 +370,7 @@ def _http_payload_log_fields(payload: JsonObject) -> JsonObject:
     return {
         "model": payload.get("model"),
         "temperature": payload.get("temperature"),
+        "model_reasoning_effort": _reasoning_effort(payload.get("reasoning")),
         "max_output_tokens": payload.get("max_output_tokens") or payload.get("max_tokens"),
         "instructions_chars": len(str(payload.get("instructions") or payload.get("system") or "")),
         "input_chars": len(str(payload.get("input") or "")),
@@ -338,12 +378,8 @@ def _http_payload_log_fields(payload: JsonObject) -> JsonObject:
     }
 
 
-def _http_response_log_fields(raw: JsonObject) -> JsonObject:
-    return {
-        "keys": sorted(str(key) for key in raw),
-        "output_text_chars": len(str(raw.get("output_text") or "")),
-        "choice_count": len(raw.get("choices")) if isinstance(raw.get("choices"), list) else None,
-    }
+def _reasoning_effort(value: object) -> object:
+    return value.get("effort") if isinstance(value, dict) else None
 
 
 def _command_model(command: list[str]) -> str | None:
@@ -354,6 +390,17 @@ def _command_model(command: list[str]) -> str | None:
     if index + 1 >= len(command):
         return None
     return command[index + 1]
+
+
+def _command_config_value(command: list[str], key: str) -> str | None:
+    for index, item in enumerate(command):
+        if item != "-c" or index + 1 >= len(command):
+            continue
+        raw = command[index + 1]
+        prefix = f"{key}="
+        if raw.startswith(prefix):
+            return raw[len(prefix):].strip('"')
+    return None
 
 
 def _strip_json_fences(text: str) -> str:

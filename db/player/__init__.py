@@ -10,7 +10,7 @@ from db.player.store import (
     record_profile_result,
     team_for_seat,
 )
-from db.player.types import LlmConfig, Player, PlayerProfile, PlayerStatistics
+from db.player.types import LlmConfig, LlmModelConfig, Player, PlayerProfile, PlayerStatistics
 
 _FACTORY_EXPORTS = {"NPC_LINEUPS", "player_for_profile"}
 
@@ -19,6 +19,7 @@ __all__ = [
     "NPC_LINEUPS",
     "PLAYER_DATABASE_PATH",
     "LlmConfig",
+    "LlmModelConfig",
     "Player",
     "PlayerDatabase",
     "PlayerProfile",

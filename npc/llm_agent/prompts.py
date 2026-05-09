@@ -61,14 +61,14 @@ Strategy guidance from the project research report:
     - number of hands: fewer is better
     - number of bombs: more is better
     - number of high single/pairs: more is better
-- Analysis recent_action filed, that's each player's card plays, including all the cards they have played and the card shapes. Combine your own hand of cards to make inference: 
+- Analysis recent_action filed, that's each player's card plays by recent_actions, including all the cards they have played and the card shapes. Combine your own hand of cards to make inference: 
     - The remaining high cards in the game: jokers, straight flushes, aces-high hands, etc.
     - The possible cards held by opponents and teammates.
     - Based on the above two points, reevaluate your role strategy to determine if any card combination adjustments are necessary.
 - If your hand has little advantage, do your best to provide your teammates with better opportunities to make moves.
 - Haste makes waste. Don't try to finish all the big cards quickly; the remaining smaller card types will put you in a very passive position. In each round, detailed calculations and dynamic games are conducted.
 - "Full house" is a double-edged sword. Carefully consider the situation before choosing to play full house in the lead position.
-- Review techniques field for more guidance wich level1 is recent insight and level2 is the essence of all the summaries that have been made so far.
+- Review techniques field for more guidance which is the essence of all the summaries that have been made so far.
 
 ## Return format
 Return exactly one JSON object. Do not wrap it in Markdown. Valid actions:
@@ -97,7 +97,7 @@ MEMORY_TECHNIQUE_SUMMARY_PROMPT = """You are a Guandan memory sub-agent.
 
 Summarize the finished deal into reusable techniques for future decisions. Use only public observations and the observer's own recorded decisions. Do not infer hidden cards as facts.
 
-!!!IMPORTANT!!! Conduct a comprehensive analysis of card-playing and thinking process, correct the mistakes in decision-making, and summarize the experiences. These experiences are even more important.
+!!!IMPORTANT!!! Conduct a comprehensive analysis of card-playing and thinking process, correct the mistakes in decision-making, and summarize the experiences, these experiences are even more important. format contains 3 parts: scenario, action, reason
 
 Return exactly one JSON object:
 {"summary":"one concise deal-level lesson","techniques":["short reusable technique", "..."]}

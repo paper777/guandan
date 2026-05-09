@@ -1,24 +1,220 @@
 {
-  "last_memory_deal_seq": 443,
-  "play_style": "balanced",
+  "last_memory_deal_seq": 3319,
+  "play_style": "With a structure-rich 20-card hand and no short-hand threat, prefer an isolated single winner over splitting a pair or spending top control to seize initiative against a low single.",
   "player_name": "Jade",
-  "player_profiles": {},
-  "score": {
-    "deals_played": 2,
-    "last_finish_order": [
-      "E",
-      "W",
-      "S",
-      "N"
-    ],
-    "level_by_team": {
-      "EW": "5"
+  "player_profiles": {
+    "Atlas": {
+      "confidence": "medium",
+      "evidence": "Publicly passed through many single contests, then later revealed A and level-6 singles, a Q-Q-Q-K-K full house, a five-J bomb, and finally went out on a small joker.",
+      "latest_seat": "S",
+      "personality": "cautious",
+      "playing_style": "Pass-heavy concealment player who yields many single fights, then tries to swing the endgame with saved full houses, bombs, and joker control.",
+      "updated_at": "2026-05-08T11:36:45.666990+00:00"
     },
-    "wins": 1
+    "Jade": {
+      "confidence": "high",
+      "evidence": "Own recorded decisions repeatedly chose low winning singles, passed many times while River was already winning, then used the natural 2-2-2-2 bomb and a wildcard 4-bomb only to deny short opponents.",
+      "latest_seat": "W",
+      "personality": "disciplined",
+      "playing_style": "Structure-preserving cooperative player who takes the cheapest useful winners, supports a partner's lane, and spends bombs only in urgent guard spots.",
+      "updated_at": "2026-05-08T11:36:45.667011+00:00"
+    },
+    "River": {
+      "confidence": "medium",
+      "evidence": "Publicly paid a 6 tribute, held repeated single tricks with cards like 9 and K while others passed, then overcalled with an A-A-A-6-6 full house to finish first.",
+      "latest_seat": "E",
+      "personality": "patient",
+      "playing_style": "Low-visibility lane-holder who keeps initiative with modest singles and saves stronger shaped power for an efficient finish.",
+      "updated_at": "2026-05-08T11:36:45.667022+00:00"
+    },
+    "also": {
+      "confidence": "medium",
+      "evidence": "Publicly opened with a pair of 5s, later kept probing with singles including 8 and a level-6 single at 10 cards, then showed an A-A-A-K-K full house and finished on a big joker.",
+      "latest_seat": "N",
+      "personality": "persistent",
+      "playing_style": "Tempo-probing player who opens with modest pressure, preserves premium exits, and converts late control into compact finishing bursts.",
+      "updated_at": "2026-05-08T11:36:45.667031+00:00"
+    }
   },
-  "seat": "W",
+  "seat": "E",
   "techniques": {
-    "level1": [],
+    "level1": [
+      {
+        "created_at": "2026-05-08T02:58:39.606927+00:00",
+        "deal_seq": 610,
+        "source": "memory_agent",
+        "summary": "Strong cheap guarding and partner coordination kept EW alive, but after stopping a one-card opponent the next lead must lock the lane with a pair/triple/full house instead of a loose single; reopening singles gave N the finish window and cost the deal.",
+        "techniques": [
+          "Pass when partner already holds the trick and there is no public endgame pressure; keep control cards and wildcards layered.",
+          "Beat low singles early with the cheapest clean winner so pairs, triples, bombs, and wildcards stay intact.",
+          "With initiative and a structure-rich hand, prefer six-card combo leads that cut turn count and keep tempo.",
+          "Use a higher same-shape answer before spending bomb-like resources whenever a natural cover exists.",
+          "Once an opponent reaches 10 or fewer cards, switch from conservation to guard mode and value denial over elegance.",
+          "Against a dangerous short-handed opponent, spending pair 2 or small joker is justified to stop their lead.",
+          "After you save the deal against a one-card opponent, do not lead back into singles if you can force pair, triple, full house, or another awkward shape.",
+          "Do not let fallback play choose a naked low single from a combo-heavy hand in endgame defense.",
+          "When only one opponent is still active and your side can race, convert control into a two-turn finish line such as full house then high pair.",
+          "Breaking a weak pair is acceptable to contest tempo, but avoid breaking premium structures unless the dangerous side is short."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "From a 10-11 card hand with one bomb and one strong natural triple, prefer the natural triple lead over an early bomb when no opponent is short; it lowers turn count while keeping a reclaim tool in reserve.",
+        "techniques": [
+          "From a 10-11 card hand with one bomb and one strong natural triple, prefer the natural triple lead over an early bomb when no opponent is short; it lowers turn count while keeping a reclaim tool in reserve."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a short hand and a natural full house available next turn, overcall a low opponent single with the cheapest clean winner to seize initiative while preserving top control singles.",
+        "techniques": [
+          "With a short hand and a natural full house available next turn, overcall a low opponent single with the cheapest clean winner to seize initiative while preserving top control singles."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a short structured hand and no immediate endgame threat, overcall an opponent's high single with the cheapest clean winner to seize initiative while preserving the top control single for later denial or reclaim.",
+        "techniques": [
+          "With a short structured hand and no immediate endgame threat, overcall an opponent's high single with the cheapest clean winner to seize initiative while preserving the top control single for later denial or reclaim."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T04:51:04.587110+00:00",
+        "deal_seq": 1176,
+        "source": "memory_agent",
+        "summary": "Cheap tempo is strongest when it preserves or improves your finishing shape: attack with natural runs and triples, save bombs as reserve, and do not split a ready-made finish unless the overcall clearly creates a better endgame.",
+        "techniques": [
+          "From a structure-rich hand, lead natural six-card formations or strong triples before spending a bomb; keep the bomb as reclaim and guard insurance.",
+          "Beat routine singles with the cheapest clean winner that leaves your bomb, triple core, and full-house skeleton intact.",
+          "Preserve a complete 5-card finish shape like full house when the single trick is low value and no short opponent must be stopped.",
+          "If you do break a 5-card finish shape, break the pair side first and keep the triple intact so the next lead still threatens a 2-turn finish.",
+          "Use top control singles such as level cards, jokers, or highest aces for lane-closing moments, not for ordinary early pickups unless they preserve a decisive route.",
+          "Once any opponent reaches 10 or fewer cards, shift from pure racing to guard mode: cheap tempo grabs and held-back control cards gain value.",
+          "When partner already holds the trick with a strong same-shape answer, pass and preserve your own structure instead of competing for the lead.",
+          "In a 4-card or 3-card endgame, lead the strongest natural group like triple or full house rather than reopening weak singles."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent leads a low single and there is no short-hand emergency, overcall with the lowest disposable winner to preserve bombs, pair skeletons, and level control for the next lead.",
+        "techniques": [
+          "When an opponent leads a low single and there is no short-hand emergency, overcall with the lowest disposable winner to preserve bombs, pair skeletons, and level control for the next lead."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a bomb-rich 20+ card hand and no opponent yet under 10 cards, a natural full house using the weakest pair side is a strong initiative lead because it shortens the hand without spending bombs or the red-heart level wildcard.",
+        "techniques": [
+          "With a bomb-rich 20+ card hand and no opponent yet under 10 cards, a natural full house using the weakest pair side is a strong initiative lead because it shortens the hand without spending bombs or the red-heart level wildcard."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a low opponent single can be beaten by a natural loose control card, prefer that over splitting bombs or triple/full-house skeletons, especially when one opponent has already finished and your partner is not yet short.",
+        "techniques": [
+          "When a low opponent single can be beaten by a natural loose control card, prefer that over splitting bombs or triple/full-house skeletons, especially when one opponent has already finished and your partner is not yet short."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T08:51:44.299474+00:00",
+        "deal_seq": 2463,
+        "source": "memory_agent",
+        "summary": "Cheap tempo was useful early, but this deal was lost because guard wins were not consistently converted into lane-closing combo leads; against a short enemy team, stopping the trick is only half the job.",
+        "techniques": [
+          "Take low singles cheaply only when the next lead can convert initiative into a stronger formation; do not trade singles just to 'have tempo.'",
+          "From a bomb-rich hand with no public short-hand threat, lead natural full houses or other multi-card formations before bombs; cut turn count while keeping reclaim tools.",
+          "When an opponent reaches 5 cards or fewer, switch fully into guard mode: every successful stop should be followed by a pair, triple, full house, run, or bomb, not another loose single.",
+          "Use the cheapest guaranteed same-shape denial before bombing; covering level-card or joker singles with big joker is better than spending a bomb when follow-up control still matters.",
+          "Dismantle structure only when the denial is urgent and meaningful; breaking into a three-pair run to stop a 5-card opponent was justified because it both won the lane and shed six cards.",
+          "Preserve bombs as layered insurance, but remember that preserved power has no value if the follow-up lead reopens the exact shape the short opponent wants.",
+          "When the opposing team already has one finisher and partner is not near out, your role becomes pure attacker-guard: deny the live opponent cheap tempo even if that means spending top control earlier.",
+          "Correct the 'cheapest winner' habit in endgames: the right question is not only 'what wins now' but 'what shape will I force next after I win.'"
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a low enemy single appears and your hand has loose singleton winners plus strong follow-up structures, take the trick with the cheapest natural winner and plan to convert initiative into a pair-run or full house next lead.",
+        "techniques": [
+          "When a low enemy single appears and your hand has loose singleton winners plus strong follow-up structures, take the trick with the cheapest natural winner and plan to convert initiative into a pair-run or full house next lead."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T11:36:04.152951+00:00",
+        "deal_seq": 3319,
+        "source": "memory_agent",
+        "summary": "Strong partner support and layered bomb defense got EW the win, but the key correction is that after partner finishes and the last live opponent is down to 1 card, every regained lead must stay closed with pairs/straights/full houses; reopening singles was the main endgame mistake.",
+        "techniques": [
+          "When partner is the shortest live hand and already winning routine single tricks, pass and preserve your own structure instead of stealing tempo.",
+          "Once partner finishes first, switch roles immediately from support to pure attacker-guard against the remaining live opponent.",
+          "Against a short opponent, use the cheapest legal denial first: same-shape control before bomb, natural bomb before wildcard bomb.",
+          "If a level single or joker lane cannot be beaten naturally, spending a natural 2-bomb to keep a short opponent from taking initiative is justified.",
+          "After you bomb or overtake a one-card opponent, lead a lane-closing shape next: full house, straight, or pair, not a loose single.",
+          "Correct the 'cheapest winner' habit in pure guard mode: the real question is what shape you will force on the next lead.",
+          "Do not test a one-card opponent with a single when your hand already contains locking pairs or a straight; cash the lock first.",
+          "A fallback single lead with one live opponent at 1 card is a major error; any legal non-single lock is safer than reopening singles.",
+          "When covering a full house in guard mode, use the weakest winning pair side so stronger pairs remain available for later locked leads.",
+          "When building a full house to continue guard pressure, preserve premium pairs and control singles if a weaker pair side wins equally well.",
+          "Cash closed-lane formations from the bottom up when they all deny equally; save the strongest pair or level pair for the last forced lock.",
+          "Team coordination won the first half of the deal, but late-stage self-racing matters too: after partner is out, convert control into the shortest closed-lane route for your own finish."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a low enemy single can be beaten by an isolated A while the rest of the hand is structure-rich, prefer cashing the loose A to seize initiative and preserve triple/full-house skeletons for the next lead.",
+        "techniques": [
+          "When a low enemy single can be beaten by an isolated A while the rest of the hand is structure-rich, prefer cashing the loose A to seize initiative and preserve triple/full-house skeletons for the next lead."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent spends big joker as a single and you have no bomb-like cover, pass cleanly and preserve structure for the next lead fight rather than breaking triples or pairs illegally.",
+        "techniques": [
+          "When an opponent spends big joker as a single and you have no bomb-like cover, pass cleanly and preserve structure for the next lead fight rather than breaking triples or pairs illegally."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a dangerous opponent is at 7 or fewer cards and your partner leads a very low single, overtake with the strongest practical same-shape denial if it preserves a lane-closing follow-up like triple_run into pairs.",
+        "techniques": [
+          "When a dangerous opponent is at 7 or fewer cards and your partner leads a very low single, overtake with the strongest practical same-shape denial if it preserves a lane-closing follow-up like triple_run into pairs."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When partner leads a very low single and the next opponent is at 7 or fewer cards, overtake with your highest practical natural single if cheaper covers do not materially increase denial; raising the bar can force the short opponent to spend premium control before taking initiative.",
+        "techniques": [
+          "When partner leads a very low single and the next opponent is at 7 or fewer cards, overtake with your highest practical natural single if cheaper covers do not materially increase denial; raising the bar can force the short opponent to spend premium control before taking initiative."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Use red-heart level wildcard to upgrade a single high card into a higher pair when the trick demands it; preserve bombs unless forced.",
+        "techniques": [
+          "Use red-heart level wildcard to upgrade a single high card into a higher pair when the trick demands it; preserve bombs unless forced."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent reaches 10 cards and tries to seize tempo with a high single, prefer the cheapest control card that retakes lead while preserving bombs and joker structure.",
+        "techniques": [
+          "When an opponent reaches 10 cards and tries to seize tempo with a high single, prefer the cheapest control card that retakes lead while preserving bombs and joker structure."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Against an unbeatable trick, preserve connected pairs and higher singles rather than splitting them for no gain.",
+        "techniques": [
+          "Against an unbeatable trick, preserve connected pairs and higher singles rather than splitting them for no gain."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Use the minimum winning response when partner is not under pressure and no bomb is needed.",
+        "techniques": [
+          "Use the minimum winning response when partner is not under pressure and no bomb is needed."
+        ]
+      }
+    ],
     "level2": {
       "bomb_usage": [],
       "combo_removal": [],
@@ -28,5 +224,5 @@
       "team_coordination": []
     }
   },
-  "updated_at": "2026-05-08T01:16:55.804638+00:00"
+  "updated_at": "2026-05-09T15:39:44.144207+00:00"
 }

@@ -34,7 +34,7 @@ Memory stores long-term lessons under `techniques`, not `skills`. `techniques.le
 - `combo_removal`
 - `others`
 
-After each deal ends, the same memory sub-agent also updates `player_profiles` by player display name, not by seat. Each profile keeps the latest known seat plus inferred personality and playing style from public observations.
+After each deal ends, the same memory sub-agent also updates `player_profiles` by player display name, not by seat. Each profile keeps the latest known seat plus inferred personality and playing style from public observations. Player memory does not store score counters; player database statistics remain in each player's `statistics.json`.
 
 LLM players also receive a `personality` profile in the prompt. Supported defaults are `aggressive`, `balanced`, and `defensive`; the profile influences risk tolerance, tempo bias, bomb usage, passing bias, and structure preservation while keeping all actions legal.
 
@@ -53,9 +53,20 @@ To use the signed-in Codex CLI instead of an API key, set an LLM player's provid
 ```json
 {
   "provider_name": "codex-cli",
-  "model_name": "gpt-5.2"
+  "play": {
+    "fast": {"model_name": "gpt-5.4-mini", "model_reasoning_effort": "low"},
+    "pro": {"model_name": "gpt-5.4", "model_reasoning_effort": "high"}
+  },
+  "memory": {
+    "model_name": "gpt-5.4",
+    "compaction_char_limit": 16000,
+    "recent_deal_scan_limit": 200,
+    "max_output_tokens": 1200
+  }
 }
 ```
+
+`play.fast` is used for normal action decisions. `play.pro` is used when the prompt has endgame pressure, partner-near-finish pressure, or ace-level stakes. `memory` is used for deal summaries, player analysis, and technique compaction. For GPT/Codex providers, `model_reasoning_effort` is forwarded to the model client. The older flat keys (`model_name`, `temperature`, `timeout_seconds`, `max_output_tokens`, and `memory_*` limits) are still accepted as aliases.
 
 Each player directory has this layout:
 
@@ -68,4 +79,16 @@ data/Jade/
   statistics.json
 ```
 
-This runs `codex exec` through the local signed-in Codex session. API-key providers remain available with `provider_name` values such as `openai`, `claude`, and `doubao`.
+This runs `codex exec` through the local signed-in Codex session. API-key providers remain available with `provider_name` values such as `openai`, `claude`, `doubao`, and `glm`. The GLM provider uses BigModel chat completions by default:
+
+```json
+{
+  "provider_name": "glm",
+  "play": {
+    "fast": {"model_name": "glm-5.1"},
+    "pro": {"model_name": "glm-5.1"}
+  }
+}
+```
+
+Set `BIGMODEL_API_KEY` for GLM, or provide `api_key` directly in the LLM config.

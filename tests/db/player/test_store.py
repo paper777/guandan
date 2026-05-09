@@ -40,7 +40,22 @@ class PlayerDatabaseTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (player_dir / "llm_config.json").write_text(
-                json.dumps({"provider_name": "codex-cli"}),
+                json.dumps(
+                    {
+                        "provider_name": "codex-cli",
+                        "timeout_seconds": 55,
+                        "play": {
+                            "fast": {"model_reasoning_effort": "low"},
+                            "pro": {"model_name": "pro-model", "model_reasoning_effort": "high"},
+                        },
+                        "memory": {
+                            "model_name": "memory-model",
+                            "compaction_char_limit": 100,
+                            "recent_deal_scan_limit": 12,
+                            "max_output_tokens": 900,
+                        },
+                    }
+                ),
                 encoding="utf-8",
             )
             (player_dir / "statistics.json").write_text(
@@ -58,11 +73,28 @@ class PlayerDatabaseTests(unittest.TestCase):
 
         profile = database.profiles[0]
         self.assertEqual(profile.preferred_seat, "E")
-        self.assertEqual(profile.llm_config.provider_name, "codex-cli")
+        self.assertEqual(profile.llm_config.play_fast.provider_name, "codex-cli")
+        self.assertEqual(profile.llm_config.play_fast.timeout_seconds, 55.0)
+        self.assertEqual(profile.llm_config.play_fast.model_reasoning_effort, "low")
+        self.assertEqual(profile.llm_config.play_pro.model_name, "pro-model")
+        self.assertEqual(profile.llm_config.play_pro.model_reasoning_effort, "high")
+        self.assertEqual(profile.llm_config.memory_model.model_name, "memory-model")
+        self.assertEqual(profile.llm_config.memory_compaction_char_limit, 100)
+        self.assertEqual(profile.llm_config.memory_recent_deal_scan_limit, 12)
+        self.assertEqual(profile.llm_config.memory_max_output_tokens, 900)
         self.assertEqual(profile.statistics.score, 9)
         self.assertNotIn("seat", saved_profile)
         self.assertEqual(saved_profile["favorite_color"], "green")
-        self.assertEqual(saved_llm_config["provider_name"], "codex-cli")
+        self.assertEqual(saved_llm_config["play"]["fast"]["provider_name"], "codex-cli")
+        self.assertNotIn("provider_name", saved_llm_config)
+        self.assertEqual(saved_llm_config["play"]["fast"]["timeout_seconds"], 55.0)
+        self.assertEqual(saved_llm_config["play"]["fast"]["model_reasoning_effort"], "low")
+        self.assertEqual(saved_llm_config["play"]["pro"]["model_name"], "pro-model")
+        self.assertEqual(saved_llm_config["play"]["pro"]["model_reasoning_effort"], "high")
+        self.assertEqual(saved_llm_config["memory"]["model_name"], "memory-model")
+        self.assertEqual(saved_llm_config["memory"]["compaction_char_limit"], 100)
+        self.assertEqual(saved_llm_config["memory"]["recent_deal_scan_limit"], 12)
+        self.assertEqual(saved_llm_config["memory"]["max_output_tokens"], 900)
         self.assertEqual(saved_statistics["score"], 9)
         self.assertEqual(saved_index["players"], ["also"])
         self.assertEqual(

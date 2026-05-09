@@ -1,4 +1,24 @@
 {
   "provider_name": "codex-cli",
-  "model_name": "gpt-5.4"
+  "timeout_seconds": 40,
+  "max_output_tokens": 800,
+  "play": {
+    "fast": {
+      "model_name": "gpt-5.4-mini",
+      "max_output_tokens": 700,
+      "model_reasoning_effort": "low"
+    },
+    "pro": {
+      "model_name": "gpt-5.4-mini",
+      "max_output_tokens": 1200,
+      "model_reasoning_effort": "high"
+    }
+  },
+  "memory": {
+    "model_name": "gpt-5.4",
+    "timeout_seconds": 60,
+    "max_output_tokens": 1200,
+    "compaction_char_limit": 16000,
+    "recent_deal_scan_limit": 200
+  }
 }

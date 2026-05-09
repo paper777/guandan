@@ -1,24 +1,183 @@
 {
-  "last_memory_deal_seq": 443,
+  "last_memory_deal_seq": 3319,
   "play_style": "balanced",
   "player_name": "River",
-  "player_profiles": {},
-  "score": {
-    "deals_played": 2,
-    "last_finish_order": [
-      "E",
-      "W",
-      "S",
-      "N"
-    ],
-    "level_by_team": {
-      "EW": "5"
+  "player_profiles": {
+    "Atlas": {
+      "confidence": "medium",
+      "evidence": "Returned a low 4 in tribute, passed through many River-led middle tricks, then later showed A lead, Q-Q-Q over K-K full house, a 5-J bomb at 9 cards, and closed second with strong singles.",
+      "latest_seat": "S",
+      "personality": "measured",
+      "playing_style": "patient holder who stays quiet through partner-led tempo, then cashes premium full houses, bombs, and high singles when a finishing lane opens",
+      "updated_at": "2026-05-08T11:37:56.129916+00:00"
     },
-    "wins": 2
+    "Jade": {
+      "confidence": "medium",
+      "evidence": "Passed repeatedly during River's long attacking sequence, then later led 9 and A, bombed also's level-6 single with four 2s, followed with K-K-K-7-7, later used another bomb, and kept leading from control.",
+      "latest_seat": "W",
+      "personality": "balanced",
+      "playing_style": "low-friction support player who stays passive while partner controls, then switches to direct endgame control with bombs and sturdy made hands",
+      "updated_at": "2026-05-08T11:37:56.129939+00:00"
+    },
+    "River": {
+      "confidence": "high",
+      "evidence": "Own recorded decisions repeatedly passed low-pressure spots, overcalled with minimal singles like K, 7, 8, and 9 when N kept tempo, then converted the hand into repeated three-pair runs, straights, full houses, and finished first.",
+      "latest_seat": "E",
+      "personality": "disciplined",
+      "playing_style": "structure-first controller who preserves shape early, interrupts cheap opponent tempo with the weakest sufficient winners, then races out through efficient multi-card sheds",
+      "updated_at": "2026-05-08T11:37:56.129951+00:00"
+    },
+    "also": {
+      "confidence": "medium",
+      "evidence": "Returned a low 3 in tribute, opened with a pair of 5s, later showed repeated cheap single tempo including an 8 at 15 cards, overcalled Jade's A with a level 6 at 10 cards, played A-A-A over K-K to reach 4, and saved the big joker to finish third.",
+      "latest_seat": "N",
+      "personality": "patient",
+      "playing_style": "initiative-focused probe player who uses cheap public leads to keep tempo, then spends stronger control late while holding a final emergency winner",
+      "updated_at": "2026-05-08T11:37:56.129964+00:00"
+    }
   },
-  "seat": "E",
+  "seat": "W",
   "techniques": {
-    "level1": [],
+    "level1": [
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent is down to 1 card, overtake partner's weak single with a near-absolute control single if that is the cleanest way to block the finish.",
+        "techniques": [
+          "When an opponent is down to 1 card, overtake partner's weak single with a near-absolute control single if that is the cleanest way to block the finish."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T03:00:14.659229+00:00",
+        "deal_seq": 610,
+        "source": "memory_agent",
+        "summary": "Preserve structure and respect partner control early, but do not let repeated cheap opponent leads turn conservation into passivity; once an opponent\u2019s hand count drops, switch hard to weakest-sufficient defense even if it means breaking premium structure.",
+        "techniques": [
+          "Do not overtake partner's winning low trick without concrete pressure; make opponents answer partner first.",
+          "Open a structure-heavy hand with low six-card formations like three-pair runs to cut count while keeping higher control for later.",
+          "If one opponent keeps the lead through repeated low singles or pairs and partner is not taking it back, stop auto-passing; contest earlier with the cheapest loose winner before the threat becomes urgent.",
+          "When an opponent reaches 10 or fewer cards, change from conserve mode to guard mode immediately.",
+          "On defense, use the weakest winning conversion: higher full house over higher full house, smallest guarding pair over a dangerous pair, and lowest practical single over a dangerous single.",
+          "Be willing to dismantle triple 2s, high pairs, or other premium structure when an opponent is at 1 to 5 cards; preventing first-out is worth more than shape preservation.",
+          "When partner is the shorter active teammate after one opponent goes out, lead cooperative low pairs or medium formations that invite partner takeover while keeping top control in reserve.",
+          "In a one-opponent race, shed stranded weak singles before cashing your strongest pairs if you still retain enough recovery control behind them."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T04:52:32.832931+00:00",
+        "deal_seq": 1176,
+        "source": "memory_agent",
+        "summary": "This deal showed the right overall pattern: preserve partner's tempo through low-pressure tricks, then switch hard to direct defense once a short opponent becomes public, using the weakest sufficient stop and turning the recovered lead into a guarded race for second.",
+        "techniques": [
+          "When partner is already winning and no opponent is at public endgame pressure, pass and make the opponents answer partner first instead of stealing tempo.",
+          "Treat a shorter active partner as the team's finisher; support that seat by preserving your control cards and bombs until an opponent becomes a real public threat.",
+          "When a dangerous opponent reaches 10 or fewer cards, stop conserving automatically and defend immediately with the cheapest hand that still blocks them.",
+          "Prefer same-shape defense over bombing when possible; if a triple run or other matching formation can stop the threat, save the bomb for later.",
+          "Use bombs only when ordinary defense is unlikely to hold or unavailable, and prefer the smallest sufficient bomb, including wildcard-assisted bombs if that is the cheapest legal stop.",
+          "After partner goes out, role changes from support to guarded attack: lead strong likely-holding pairs or formations that shed cards while keeping jokers or absolute control behind them.",
+          "Do not spend a lower joker first when closing with only joker singles left and opponents still have cards; cash the absolute top control first so a matching higher joker cannot steal the lead and strand your last card.",
+          "After an expensive defensive takeover, do not waste the borrowed lead on a weak throwaway single if you still have sturdy pairs or formations; convert that lead into pressure immediately."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Against a 1-card opponent's dangerous single, prefer the weakest sufficient same-shape stop before considering higher control cards.",
+        "techniques": [
+          "Against a 1-card opponent's dangerous single, prefer the weakest sufficient same-shape stop before considering higher control cards."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a 1-card opponent pressures with a small-joker single and no higher single exists, spend the smallest available bomb first and keep the stronger bomb for the follow-up fight.",
+        "techniques": [
+          "When a 1-card opponent pressures with a small-joker single and no higher single exists, spend the smallest available bomb first and keep the stronger bomb for the follow-up fight."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T08:53:34.483184+00:00",
+        "deal_seq": 2463,
+        "source": "memory_agent",
+        "summary": "This deal was lost more by delayed tempo intervention than by late defense: preserving structure and respecting partner were fine early, but repeated cheap opponent leads without partner retakes were a public signal to switch earlier from conserve mode to active disruption.",
+        "techniques": [
+          "Do not let repeated low opponent leads continue uncontested just because no one is under 10 cards yet; if the same opponent keeps keeping tempo and partner is not retaking, step in earlier with the weakest loose winner.",
+          "Respect partner's winning trick, but stop assuming 'partner can answer later' after several pass cycles show that partner is not taking the lead back.",
+          "When a short opponent shows a strong multi-card hand you cannot match naturally, use the smallest sufficient bomb; saving the stronger bomb for the next fight is correct.",
+          "After spending a bomb to stop a short opponent, plan the follow-up lead for conversion, not mere delay; choose a lead that sheds cards efficiently or creates a clearer handoff to partner.",
+          "In guard mode against the only live opponent, keep using the weakest sufficient same-shape stop; save top singles and stronger bombs for the trick that truly forces them.",
+          "Be willing to trade some structure before formal endgame counts when public tempo already favors one opponent too heavily; tempo loss itself is a danger signal.",
+          "A long support hand should preserve premium control early, but once the table shows partner is not becoming the finisher, the long hand must actively break the opponent's rhythm.",
+          "Bomb timing and single-card defense work best as a sequence: earlier disruption, then cheapest stop, then a purposeful next lead. Defensive plays that are individually correct but disconnected often only postpone a losing race."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a long structure-heavy hand and no public endgame threat, lead the lowest natural six-card formation that preserves bombs and top triples; use the red-heart level card as glue only when it improves count reduction cleanly.",
+        "techniques": [
+          "With a long structure-heavy hand and no public endgame threat, lead the lowest natural six-card formation that preserves bombs and top triples; use the red-heart level card as glue only when it improves count reduction cleanly."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a shorter opponent keeps or regains single-card tempo before formal endgame pressure, prefer the weakest loose overcall that breaks no premium structure.",
+        "techniques": [
+          "When a shorter opponent keeps or regains single-card tempo before formal endgame pressure, prefer the weakest loose overcall that breaks no premium structure."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a 10-card hand that cleanly forms two full houses and no immediate defensive pressure, lead the lower full house first so the higher full house remains as the follow-up exit threat.",
+        "techniques": [
+          "With a 10-card hand that cleanly forms two full houses and no immediate defensive pressure, lead the lower full house first so the higher full house remains as the follow-up exit threat."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With a 6-card hand of triple A plus a pair and no urgent defensive pressure, prefer the full-house lead that cuts directly to one card when partner is long and you are the clear attacking seat.",
+        "techniques": [
+          "With a 6-card hand of triple A plus a pair and no urgent defensive pressure, prefer the full-house lead that cuts directly to one card when partner is long and you are the clear attacking seat."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T11:37:11.133932+00:00",
+        "deal_seq": 3319,
+        "source": "memory_agent",
+        "summary": "A long structured hand should attack proactively with efficient low formations, but once one opponent shows repeated cheap tempo and partner is not reclaiming the lead, conservation must stop earlier; the winning pattern is early structure shedding, timely weakest-sufficient tempo breaks, then a fast self-finish with preserved high control.",
+        "techniques": [
+          "With a long structure-rich hand and no public 10-card threat, lead the lowest efficient formation first, especially three-pair runs and straights, to cut hand count while preserving bombs and top control.",
+          "Do not let the same opponent keep retaking cheap single tempo just because no one is under 10 cards yet; repeated public initiative plus partner passivity is already a cue to interrupt earlier.",
+          "When interrupting early single tempo, use the weakest loose winner that does not break premium pairs, triples, or bombs.",
+          "If partner is repeatedly passing and not becoming the finishing seat, shift from support mode to self-finishing attacker mode instead of waiting for partner rescue.",
+          "Use the red-heart level card as glue only when it creates major count reduction cleanly; do not spend it early when a natural formation does nearly the same job.",
+          "After winning tempo with a loose single, convert the lead into a multi-card shedding formation rather than a low-information probe.",
+          "A hand that can be partitioned into a few strong groups should favor that route even if partner is behind; clean self-finish paths can still win the deal when partner later finishes last.",
+          "Preserve a natural bomb while ordinary formations are still carrying tricks; bomb value rises later when opponents need emergency stops or forced overcalls.",
+          "When shortening to 6 to 8 cards with strong control, prefer lines that cut directly to 1 card or 0 in two turns rather than preserving extra flexibility you no longer need.",
+          "Against a strong opposing full house late, answer with your own full house to finish if it clears your hand; endgame conversion is worth more than holding theoretical control back.",
+          "Correct the earlier mistake of overrespecting low-pressure opponent leads: several early passes against the same cheap tempo were too passive and should become earlier weakest-sufficient takeovers in future deals.",
+          "Correct the follow-up discipline after gaining lead: once you decide to contest tempo, keep pressing with efficient formations until your hand is compressed, instead of drifting back into passive single-trick conservation."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "As leader after a won trick, prefer dumping a low coherent pair when no partner-finish pressure exists.",
+        "techniques": [
+          "As leader after a won trick, prefer dumping a low coherent pair when no partner-finish pressure exists."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Preserve strong pairs and triples for later control rather than opening with them immediately.",
+        "techniques": [
+          "Preserve strong pairs and triples for later control rather than opening with them immediately."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Use the cheapest winning pair when responding to preserve control and avoid donating tempo to opponents.",
+        "techniques": [
+          "Use the cheapest winning pair when responding to preserve control and avoid donating tempo to opponents."
+        ]
+      }
+    ],
     "level2": {
       "bomb_usage": [],
       "combo_removal": [],
@@ -28,5 +187,5 @@
       "team_coordination": []
     }
   },
-  "updated_at": "2026-05-08T01:16:55.815452+00:00"
+  "updated_at": "2026-05-09T15:39:44.160281+00:00"
 }

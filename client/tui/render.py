@@ -220,6 +220,14 @@ def format_npc_metadata(policy: object) -> str:
     config = getattr(policy, "config", None)
     if config is None:
         return ""
+    resolve_model = getattr(config, "resolved_model", None)
+    if callable(resolve_model):
+        model_config = resolve_model("fast")
+        provider = str(getattr(model_config, "provider_name", "") or "").strip()
+        model = str(getattr(model_config, "model_name", "") or "").strip()
+        if provider and model:
+            return f"{provider}/{model}"
+        return provider or model
     provider = str(getattr(config, "provider_name", "") or "").strip()
     model = str(getattr(config, "model_name", "") or "").strip()
     if provider and model:

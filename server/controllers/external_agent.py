@@ -12,7 +12,7 @@ from server.services.snapshots import SeatSnapshot
 class ExternalAgentClient:
     agent_url: str
     shared_secret: str | None = None
-    timeout_seconds: float = 3.0
+    timeout_seconds: float = 40.0
 
     def build_payload(self, request_id: str, snapshot: SeatSnapshot, prompt: dict[str, Any]) -> dict[str, Any]:
         return {

@@ -1,24 +1,212 @@
 {
-  "last_memory_deal_seq": 443,
+  "last_memory_deal_seq": 3319,
   "play_style": "balanced",
   "player_name": "also",
-  "player_profiles": {},
-  "score": {
-    "deals_played": 2,
-    "last_finish_order": [
-      "E",
-      "W",
-      "S",
-      "N"
-    ],
-    "level_by_team": {
-      "EW": "5"
+  "player_profiles": {
+    "Atlas": {
+      "confidence": "medium",
+      "evidence": "Publicly passed through many of N's early pair and single contests, then later led QQQKK, fired a J-bomb, and rode cheap singles plus SJ to finish second.",
+      "latest_seat": "S",
+      "personality": "supportive",
+      "playing_style": "patient partner-first player who yields many marginal fights, preserves heavy shapes, and then cashes bombs and control singles when the race for second opens.",
+      "updated_at": "2026-05-08T11:35:05.749562+00:00"
     },
-    "wins": 1
+    "Jade": {
+      "confidence": "medium",
+      "evidence": "Publicly paid big-joker tribute, later bombed N's big-joker pair exit with 2222, then showed KKK77 and another bomb to keep EW's result alive.",
+      "latest_seat": "W",
+      "personality": "aggressive",
+      "playing_style": "trap-heavy counterpuncher who stays quiet for stretches, then uses well-timed bombs and strong follow-ups to break exits and keep pressure on.",
+      "updated_at": "2026-05-08T11:35:05.749580+00:00"
+    },
+    "River": {
+      "confidence": "medium",
+      "evidence": "Publicly kept leading low and mid singles from E, passed many other contests, then overcalled Atlas's QQQKK with AAA66 to finish first.",
+      "latest_seat": "E",
+      "personality": "cautious",
+      "playing_style": "measured tempo prober who repeatedly restarts cheap single leads, avoids many side fights, and converts a prepared power shape at the key moment.",
+      "updated_at": "2026-05-08T11:35:05.749589+00:00"
+    },
+    "also": {
+      "confidence": "high",
+      "evidence": "Observer decisions repeatedly overcalled River's cheap singles with isolated 8/6/9/Q/K, led pair probes plus three-pair runs and full houses, then passed to feed Atlas's finish before using AAAKK and the last big joker to beat Jade for third.",
+      "latest_seat": "N",
+      "personality": "balanced",
+      "playing_style": "structure-conscious tempo denier who repeatedly buys the lead with the cheapest winning singles, compresses with pair runs and full houses, and later shifts into clean partner support and finish prevention.",
+      "updated_at": "2026-05-08T11:35:05.749596+00:00"
+    }
   },
   "seat": "N",
   "techniques": {
-    "level1": [],
+    "level1": [
+      {
+        "created_at": "2026-05-08T02:57:03.550967+00:00",
+        "deal_seq": 610,
+        "source": "memory_agent",
+        "summary": "Structured shedding won first place, but the bigger lesson is to balance that discipline with earlier cheap tempo contests and precise top-card counting so repeated low enemy leads do not grow into a free endgame for them.",
+        "techniques": [
+          "Pass on partner's cheap winning lead unless there is real endgame pressure; do not steal control for no gain.",
+          "If partner has passed and an opponent keeps leading weak singles, contest sooner with the cheapest isolated winner instead of auto-passing every round.",
+          "From the lead, unload medium pairs first to test resistance and keep bombs, triples, and top singles intact.",
+          "Lead the lower full house before the stronger one when both are available; compress hand count while preserving later control.",
+          "When an opponent takes a full house, prefer a same-shape higher full house over spending a bomb if that keeps bomb reserve.",
+          "Do not break bombs or strong triple structure just to beat harmless low singles with no concrete tempo gain.",
+          "In single-card endgames, cash stranded weak singles before A or level-card controls so the last cards remain re-entry tools.",
+          "Count both jokers separately: a public big joker does not make a level-2 single safe if the small joker is still unseen.",
+          "Against a right-hand opponent who is shedding steadily, repeated small passes can be a mistake even without report pressure; tempo denial matters before they reach 10 or fewer.",
+          "When holding only two strong singles to finish, plan for the remaining public stoppers instead of assuming the higher one is automatically secure."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T04:49:08.424303+00:00",
+        "deal_seq": 1176,
+        "source": "memory_agent",
+        "summary": "This deal showed that good structure preservation and well-timed defensive bombs are not enough by themselves; once opponents reach report or one opponent is already out, tempo denial must become more direct, and passing for partner support becomes a mistake if partner has not publicly shown the ability to take the trick.",
+        "techniques": [
+          "Return partner tribute with the lowest legal card, especially 10 or lower, and keep all real controls.",
+          "Pass on partner's cheap winning single in normal tempo; do not overcall partner without a concrete defensive gain.",
+          "Against a right-hand opponent leading repeated weak singles, contest with the cheapest isolated winner instead of donating endless free tempo.",
+          "Use isolated singles first when fighting for tempo; preserve pairs, triple structure, bombs, level control, and jokers.",
+          "Spend a bomb on a dangerous opponent's long shedding combo when that combo is likely to keep the lead and cut their hand sharply.",
+          "Use the level card as the cheapest high-single stop before spending jokers when it cleanly blocks A-level pressure.",
+          "Do not over-trust partner-last-seat rescue in endgame defense; if partner has not publicly taken similar tricks, take the cheapest direct stop yourself.",
+          "Once one opponent is out and their partner is chasing second, upgrade from cooperative passing to hard tempo denial and spend unbeatable control earlier if it is the only guaranteed stop.",
+          "After you win a must-stop trick against a one-card opponent, plan the follow-up shape for partner delivery from public evidence; do not assume partner's last few cards match the shape you prefer.",
+          "Break medium pairs or runs only when report pressure is real; in quiet phases, keep formations intact for later multi-card control."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When partner is currently winning a cheap single and no opponent is at immediate one-card danger, preserve control and pass rather than stealing the trick.",
+        "techniques": [
+          "When partner is currently winning a cheap single and no opponent is at immediate one-card danger, preserve control and pass rather than stealing the trick."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When partner is already winning a modest single and the only live opponent is not near finish, pass and preserve your control cards for later delivery or defense.",
+        "techniques": [
+          "When partner is already winning a modest single and the only live opponent is not near finish, pass and preserve your control cards for later delivery or defense."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T08:50:20.316900+00:00",
+        "deal_seq": 2463,
+        "source": "memory_agent",
+        "summary": "SN won first-second by denying repeated cheap single tempo with isolated cards and then cashing a pair-heavy control hand into a planned exit; the main correction is to stop overusing small probing pair leads once a strong multi-card shedding route is publicly available.",
+        "techniques": [
+          "Against a right-hand opponent who keeps leading weak singles, contest early with the cheapest isolated winner instead of donating repeated free leads.",
+          "Use isolated singles for tempo fights and keep pairs, triples, bombs, and level-card control intact for later tricks.",
+          "When no one is under ten-card pressure, medium disposable pair leads are good probes because they shed safely without exposing premium control.",
+          "Do not stay in probe mode too long; once you can see a clean public route like high pair-run into follow-up control, switch to compression and cut hand count fast.",
+          "Do not break bombs or full-house cores just to beat harmless low singles when a loose single can do the same job.",
+          "Preserve the strongest pair as the likely last exit card and cash weaker singles or lower pairs before it when the table is calm.",
+          "Plan first-place lines as linked formations, not isolated tricks: tempo denial first, then major structure shed, then final control exit.",
+          "After finishing on an unbeaten play, value routes that hand partner the borrowed lead in an attacking posture for second place."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When holding a strong compression route, take an opponent's exposed medium single with the cheapest structure-preserving winner instead of donating free tempo.",
+        "techniques": [
+          "When holding a strong compression route, take an opponent's exposed medium single with the cheapest structure-preserving winner instead of donating free tempo."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When the dangerous opponent is behind partner's weak single, overcall with the cheapest near-unbeatable isolated control card; prefer a level singleton before spending jokers.",
+        "techniques": [
+          "When the dangerous opponent is behind partner's weak single, overcall with the cheapest near-unbeatable isolated control card; prefer a level singleton before spending jokers."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a low-count opponent sits behind your partner's weak single, overcall with the cheapest near-unbeatable isolated control card rather than trusting the trick to hold.",
+        "techniques": [
+          "When a low-count opponent sits behind your partner's weak single, overcall with the cheapest near-unbeatable isolated control card rather than trusting the trick to hold."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When partner is already winning a weak single and the only live opponent is not under endgame pressure, pass and preserve control so partner keeps the lead in the race for second.",
+        "techniques": [
+          "When partner is already winning a weak single and the only live opponent is not under endgame pressure, pass and preserve control so partner keeps the lead in the race for second."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When partner is already winning a modest single and the only live opponent is far from finish, pass and preserve control so partner keeps the lead for second-place pressure.",
+        "techniques": [
+          "When partner is already winning a modest single and the only live opponent is far from finish, pass and preserve control so partner keeps the lead for second-place pressure."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T11:34:15.085212+00:00",
+        "deal_seq": 3319,
+        "source": "memory_agent",
+        "summary": "Strong tempo denial and later partner support saved second-third, but the missed upgrade lesson is to stop endless medium-pair probing and convert a control-heavy hand into earlier multi-card compression once a clean shedding route is public.",
+        "techniques": [
+          "Return tribute with the lowest legal card and keep all real controls.",
+          "Against a right-hand opponent who keeps leading weak singles while partner is not holding, take with the cheapest isolated winner instead of donating repeated free tempo.",
+          "Use isolated singles for tempo fights; preserve pairs, triples, full houses, bombs, and jokers for later compression or defense.",
+          "Do not stay in probe mode too long: after a few safe pair leads or once a clean three-pair-run or full-house route is available, switch from testing to hand-count compression.",
+          "Avoid repeating the same medium-pair probe when it no longer gains information or tempo; re-lead stronger multi-card shapes instead.",
+          "When an opponent reaches 10 or fewer and partner is still not controlling, upgrade from cooperative passing to hard tempo denial and use the cheapest strong stopper first, such as the level single before jokers.",
+          "When partner is already winning a cheap single and the only live opponent is not near finish, pass and preserve control so partner keeps the lead for second-place pressure.",
+          "After partner finishes and only one opponent remains, cash your vulnerable loose card before your locked controls so you do not strand a loser behind jokers or top singles.",
+          "Ordinary finishing pairs are still bombable; when trying to go out without a bomb, keep a recovery plan for the next trick instead of assuming the exit is locked."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When right-hand opponent leads a medium single and partner has already passed, beat it with the cheapest isolated winner that preserves bombs and pair structure instead of donating lead or breaking a bomb.",
+        "techniques": [
+          "When right-hand opponent leads a medium single and partner has already passed, beat it with the cheapest isolated winner that preserves bombs and pair structure instead of donating lead or breaking a bomb."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "With control, a bomb, and no report pressure, lead the lower available full house first to compress hand count while preserving stronger pairs and the bomb.",
+        "techniques": [
+          "With control, a bomb, and no report pressure, lead the lower available full house first to compress hand count while preserving stronger pairs and the bomb."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When holding a clean low-count route with an isolated winner plus preserved pair/bomb structure, take an opponent's cheap single with the isolated card rather than passing away the lead.",
+        "techniques": [
+          "When holding a clean low-count route with an isolated winner plus preserved pair/bomb structure, take an opponent's cheap single with the isolated card rather than passing away the lead."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent leads a level-rank single that your ordinary high singles cannot beat, use a compact bomb if it creates an immediate low-card follow-up route and your partner is not the likely finisher.",
+        "techniques": [
+          "When an opponent leads a level-rank single that your ordinary high singles cannot beat, use a compact bomb if it creates an immediate low-card follow-up route and your partner is not the likely finisher."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When a two-card opponent leads a beatable single and one A-win preserves an immediate high full-house exit, prefer the single A over a bomb or lower winner.",
+        "techniques": [
+          "When a two-card opponent leads a beatable single and one A-win preserves an immediate high full-house exit, prefer the single A over a bomb or lower winner."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When responding to a single, use the lowest clean winner to conserve stronger singles.",
+        "techniques": [
+          "When responding to a single, use the lowest clean winner to conserve stronger singles."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "Without a bomb or partner-finisher pressure, keep control without overcommitting high cards.",
+        "techniques": [
+          "Without a bomb or partner-finisher pressure, keep control without overcommitting high cards."
+        ]
+      }
+    ],
     "level2": {
       "bomb_usage": [],
       "combo_removal": [],
@@ -28,5 +216,5 @@
       "team_coordination": []
     }
   },
-  "updated_at": "2026-05-08T01:16:55.792807+00:00"
+  "updated_at": "2026-05-09T15:39:44.128983+00:00"
 }

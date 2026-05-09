@@ -63,11 +63,6 @@ class StateMachine:
             current = self._drive_bot_turns(public_snapshot)
             while True:
                 state = self._machine_state(current)
-                debug_event(
-                    "client.state_machine.state_evaluated",
-                    state=str(state),
-                    **_state_machine_log_fields(self.session, current),
-                )
                 if state == MachineState.FINISHED:
                     finished = self._finish(current)
                     debug_event(
@@ -339,12 +334,6 @@ class StateMachine:
         return _COMMAND_NOT_HANDLED
 
     def _submit_human_turn(self, command: str, seat_snapshot: JsonObject) -> JsonObject:
-        trace_event(
-            "client.state_machine.human_command_started",
-            table_id=self.session.table_id,
-            seat=self.session.human_seat,
-            command=command_action(command, seat_snapshot),
-        )
         try:
             response = submit_human_command(self.client, self.session, command, seat_snapshot)
         except GuandanClientError as exc:
@@ -385,7 +374,6 @@ def drive_bot_turns(
 ) -> JsonObject:
     current = public_snapshot
     actions = 0
-    trace_event("client.state_machine.bot_drive_started", **_state_machine_log_fields(session, current))
     while current.get("phase") in ACTIVE_PHASES:
         seat = snapshot_acting_seat(current)
         if not isinstance(seat, str) or seat not in session.bot_broker.seats:
@@ -439,13 +427,6 @@ def drive_bot_turns(
             trigger_role_observers(session, seat, result.action, result.response)
         current = client.table_snapshot(session.table_id)
         actions += len(submitted)
-        debug_event(
-            "client.state_machine.bot_actions_submitted",
-            seat=seat,
-            submitted_actions=len(submitted),
-            total_submitted_actions=actions,
-            **_state_machine_log_fields(session, current),
-        )
     debug_event(
         "client.state_machine.bot_drive_completed",
         reason="inactive_phase",
@@ -638,14 +619,6 @@ def wait_for_timeout_resolution(
     deadline = before.get("action_deadline_epoch_ms")
     if not isinstance(deadline, int):
         return before
-    trace_event(
-        "client.state_machine.timeout_wait_started",
-        table_id=before.get("table_id"),
-        phase=before.get("phase"),
-        acting_seat=snapshot_acting_seat(before),
-        event_seq=before.get("event_seq"),
-        deadline_epoch_ms=deadline,
-    )
     sleep_seconds = max(0.0, (deadline - int(time.time() * 1000)) / 1000)
     if sleep_seconds > 0:
         time.sleep(sleep_seconds)

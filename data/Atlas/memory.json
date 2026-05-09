@@ -1,24 +1,151 @@
 {
-  "last_memory_deal_seq": 443,
+  "last_memory_deal_seq": 3319,
   "play_style": "balanced",
   "player_name": "Atlas",
-  "player_profiles": {},
-  "score": {
-    "deals_played": 1,
-    "last_finish_order": [
-      "E",
-      "W",
-      "S",
-      "N"
-    ],
-    "level_by_team": {
-      "EW": "5"
+  "player_profiles": {
+    "Atlas": {
+      "confidence": "high",
+      "evidence": "Atlas's recorded decisions repeatedly chose pass over partner N's live low singles; later Atlas publicly blocked River with K, A, and level-6, bombed after E went out, then led compressed shapes and finished second on the small joker.",
+      "latest_seat": "S",
+      "personality": "disciplined",
+      "playing_style": "support-first, structure-preserving player who passed many partner-winning single lanes, then switched into precise blocking and fast compression to secure second.",
+      "updated_at": "2026-05-08T11:39:13.793653+00:00"
     },
-    "wins": 0
+    "Jade": {
+      "confidence": "medium",
+      "evidence": "Jade publicly paid the big joker as tribute, passed many early single lanes, then later showed an A single, a 2-bomb, a K-full-house, a 4-bomb, and a pair-10 lane before finishing last.",
+      "latest_seat": "W",
+      "personality": "patient",
+      "playing_style": "power-hoarding player who stayed quiet through many early contests, then revealed bombs and full houses late to keep counterplay alive.",
+      "updated_at": "2026-05-08T11:39:13.793696+00:00"
+    },
+    "River": {
+      "confidence": "medium",
+      "evidence": "River publicly led many singles over time (including 9, 2, 3, 4, 5, 7, 8, 9, 10, J, K), pushed through endgame pressure, then beat Atlas's full house with A-A-A-6-6 and finished first.",
+      "latest_seat": "E",
+      "personality": "patient",
+      "playing_style": "single-lane pressure player who kept probing with low and mid singles, preserved stronger shape control, and converted with a higher full house for first.",
+      "updated_at": "2026-05-08T11:39:13.793681+00:00"
+    },
+    "also": {
+      "confidence": "medium",
+      "evidence": "also publicly opened with pair 5, was repeatedly described in Atlas's recorded decisions as holding live low single lanes for partner support, later showed single 8, single 6, A-A-A-K-K, and finally went out on the big joker.",
+      "latest_seat": "N",
+      "personality": "balanced",
+      "playing_style": "tempo-conscious partner who established cheap pair and single lanes early, then used strong full-house control and a final big joker to finish third.",
+      "updated_at": "2026-05-08T11:39:13.793701+00:00"
+    }
   },
   "seat": "S",
   "techniques": {
-    "level1": [],
+    "level1": [
+      {
+        "created_at": "2026-05-08T03:02:09.876861+00:00",
+        "deal_seq": 610,
+        "source": "memory_agent",
+        "summary": "Disciplined early partner-support won the deal, but after partner went out first the better lesson is to pivot faster into cheap, structure-safe tempo grabs for second place instead of mixing late passivity with speculative premium overcalls.",
+        "techniques": [
+          "When partner is currently winning and no player is under public report pressure, default to pass and do not overtake partner's live trick.",
+          "When partner is at 1 card, spend the smallest guaranteed stopper immediately to break an opponent's control; if only a joker surely works, use it.",
+          "If partner finishes on the current winning play, pass over that card whenever possible to preserve the borrowed-lead chance.",
+          "After partner finishes first, change roles immediately from pure support to race-and-block: take control with the lowest clean winner that does not break key structure.",
+          "Grab low-single tempo only with true spare cards; do not split pairs, triples, or full-house material just to win a small early trick.",
+          "Do not spend top combo control like triple A or your best full house on a mid-trick contest unless it is likely to hold the lead or it directly stops a reported opponent.",
+          "Against reported opponents, defend the exact exit lane with the cheapest sufficient control card and keep stronger stoppers for the next forced block.",
+          "Without bombs, preserve combo density early, but once opponents are reported, value tempo more and cash clean winners sooner."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T04:54:09.289231+00:00",
+        "deal_seq": 1176,
+        "source": "memory_agent",
+        "summary": "Protect partner\u2019s secure tempo, but once an opponent is publicly pressured switch to real blocking; this deal swung on one unnecessary takeover of partner\u2019s winning trick and a post-bomb overcommitment that gave control back.",
+        "techniques": [
+          "When partner is already winning and the dangerous opponent has already passed, do not overtake with a spare single just to choose the next lead.",
+          "Early with a structure-rich hand and no report pressure, lead only true spare singles and keep pairs, triples, bombs, and wildcard flexibility intact.",
+          "When an opponent reaches 10 or fewer and keeps probing singles, block with the cheapest clean spare single first and save level cards and bombs for higher-pressure stops.",
+          "Bomb only when normal same-shape defense is gone and the bomb directly cuts off a reported opponent\u2019s exit lane; the emergency A-bomb over the level single was the right kind of bomb.",
+          "After a rescue bomb wins the lead, prefer the stickiest control shape for the next attack; a top triple is often safer than exposing a long triple-run that can be overcalled.",
+          "Do not break triple-run or full-house structure for medium-pressure combo contests when partner still has a chance to act; spend structure only for lead retention or a direct endgame block.",
+          "After opponents take first place, pivot immediately from support to race-and-block: take cheap tempo that improves your own exit path and denies their second place.",
+          "Against a 1-card opponent, overtaking partner\u2019s weak winner is worthwhile only if your replacement card is likely to hold the whole trick, not merely beat partner\u2019s card."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "After opponents secure first place and you are within two cards of finishing, take the cheapest available tempo win instead of passing, and keep the absolute top stopper for the last exchange.",
+        "techniques": [
+          "After opponents secure first place and you are within two cards of finishing, take the cheapest available tempo win instead of passing, and keep the absolute top stopper for the last exchange."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "After opponents take first and you can win a live single with the cheaper of two remaining controls, take the cheap winner and keep the absolute top card for the final exit.",
+        "techniques": [
+          "After opponents take first and you can win a live single with the cheaper of two remaining controls, take the cheap winner and keep the absolute top card for the final exit."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "After partner finishes first and you inherit or hold the lead, favor a large natural control structure like triple_run to race for second while preserving bombs and jokers for later blocks.",
+        "techniques": [
+          "After partner finishes first and you inherit or hold the lead, favor a large natural control structure like triple_run to race for second while preserving bombs and jokers for later blocks."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "After partner finishes first while both opponents still hold long hands, prefer a high-compression lead such as a full house when it preserves jokers and critical endgame stoppers for the race to second.",
+        "techniques": [
+          "After partner finishes first while both opponents still hold long hands, prefer a high-compression lead such as a full house when it preserves jokers and critical endgame stoppers for the race to second."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T08:55:18.082600+00:00",
+        "deal_seq": 2463,
+        "source": "memory_agent",
+        "summary": "This deal rewarded disciplined early partner-support from a structure-rich hand, but the key correction is to drop that pass-first posture the moment partner finishes first and convert the borrowed lead into a fast race for second with natural high-compression formations while reserving bombs and absolute top controls for emergencies or the final exit.",
+        "techniques": [
+          "With a bomb-rich, structure-heavy hand and no public 10-card pressure, pass over low single contests and do not steal partner's live small tricks.",
+          "Do not break pairs, triples, or bomb structure just to win early single tempo when partner still has a chance to act behind you.",
+          "Once partner finishes first, switch roles immediately from support to race-and-block; borrowed lead is for your own exit path, not more passive guarding.",
+          "After partner-first, lead the largest natural control shape available, such as a high triple_run, before spending bombs or jokers.",
+          "Use the red-heart level card to complete a compressing non-joker combo when it cuts hand count and preserves stronger stoppers for later exchanges.",
+          "Keep bombs as denial tools rather than opening attacks when opponents still hold long hands and ordinary premium formations can carry tempo.",
+          "Sequence endgame controls from cheaper strong winners to absolute tops: lead the lowest near-certain pair first, keep the stronger pair next, and save the best single for the last finish.",
+          "Correct the common thinking mistake of repeating 'no report pressure, so pass' after the board state changes; once partner has secured first, continued passivity wastes the team\u2019s biggest timing advantage."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When an opponent has already finished first and their final unbeaten play would pass borrowed lead toward the opposing partner, spend the cheapest legal bomb-like stopper that preserves your next-turn structure to prevent the enemy team from taking second uncontested.",
+        "techniques": [
+          "When an opponent has already finished first and their final unbeaten play would pass borrowed lead toward the opposing partner, spend the cheapest legal bomb-like stopper that preserves your next-turn structure to prevent the enemy team from taking second uncontested."
+        ]
+      },
+      {
+        "created_at": "2026-05-08T11:38:34.932326+00:00",
+        "deal_seq": 3319,
+        "source": "memory_agent",
+        "summary": "Early partner-support and the late rescue bomb were good, but the biggest correction is to stop giving a reported short-hand opponent easy same-shape finish lanes: defend their repeated singles earlier with the cheapest stopper, and on lead avoid ordinary 5-card shapes they can answer and go out on.",
+        "techniques": [
+          "When partner is winning low early and both opponents are still long, pass and keep pairs, triples, and bombs intact instead of stealing harmless tempo.",
+          "Once an opponent reaches 10 or fewer and keeps leading singles, stop default-passing; block sooner with the cheapest clean single winner instead of letting them keep repeated lead for free.",
+          "Do not let \"partner still acts behind\" override public report pressure; against a reported opponent, tempo denial is more important than preserving every premium control.",
+          "Against a 5-card reported opponent, avoid leading ordinary 5-card shapes such as a full house if they could answer in-kind and finish immediately.",
+          "When a dangerous opponent is short, prefer 6-card denial shapes or other sticky leads that cannot be used as a simple same-shape go-out.",
+          "If an opponent finishes first on an ordinary hand and borrowed lead would pass toward their partner, use the cheapest legal bomb-like stopper that preserves your best follow-up structure.",
+          "After a rescue bomb or after opponents take first, pivot immediately from support to race-and-block: lead your best natural compression shape and reduce the hand quickly.",
+          "In the race for second, sequence controls from cheaper winner to absolute top; take live tempo with the lower stopper first and keep the joker or best single for the last forced exchange."
+        ]
+      },
+      {
+        "source": "action_memory_update",
+        "summary": "When no legal same-type response exists and no bomb is available, pass cleanly rather than breaking structure.",
+        "techniques": [
+          "When no legal same-type response exists and no bomb is available, pass cleanly rather than breaking structure."
+        ]
+      }
+    ],
     "level2": {
       "bomb_usage": [],
       "combo_removal": [],
@@ -28,5 +155,5 @@
       "team_coordination": []
     }
   },
-  "updated_at": "2026-05-08T01:16:55.821348+00:00"
+  "updated_at": "2026-05-09T15:39:44.176828+00:00"
 }

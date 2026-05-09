@@ -17,7 +17,6 @@ from npc.llm_agent.context import (
     safe_snapshot,
     seat_from_request,
     snapshot_value,
-    team_for_seat,
 )
 from npc.llm_agent.memory import MemoryAgent, append_technique_updates
 from npc.llm_agent.personality import personality_context
@@ -50,10 +49,11 @@ class LlmAgentPlayer(Player):
     ) -> None:
         self.config = config or LlmAgentConfig()
         self.provider = provider or provider_from_config(self.config)
+        memory_model = self.config.resolved_model("memory")
         self.memory_agent = memory_agent or MemoryAgent(
             self.provider,
             compaction_char_limit=self.config.memory_compaction_char_limit,
-            max_output_tokens=self.config.memory_max_output_tokens,
+            max_output_tokens=memory_model.max_output_tokens,
         )
         self._fallback = DummyBotPlayer()
         self._stores_by_namespace: dict[str, tuple[JsonMemoryStore, JsonActionLog]] = {}
@@ -63,32 +63,21 @@ class LlmAgentPlayer(Player):
         public = request.snapshot.get("public")
         public_snapshot = public if isinstance(public, dict) else {}
         deadline_epoch_ms = public_snapshot.get("action_deadline_epoch_ms")
+        fast_model = self.config.resolved_model("fast")
         trace_event(
             "llm_player.decision_started",
             request_id=request.request_id,
             table_id=snapshot_value(request, "table_id"),
             seat=seat_from_request(request),
             player_name=self.config.display_name_for(seat_from_request(request)),
-            provider=self.config.provider_name,
-            model=self.config.model_name,
+            provider=fast_model.provider_name,
+            model=fast_model.model_name,
             legal_action=request.prompt.get("kind"),
             event_seq=public_value(request, "event_seq"),
             **deadline_fields(deadline_epoch_ms),
         )
         try:
             context = self._prepare_decision(request)
-            debug_event(
-                "llm_player.prompt_prepared",
-                request_id=request.request_id,
-                table_id=snapshot_value(request, "table_id"),
-                seat=context.request_context.seat,
-                duration_ms=elapsed_ms(started),
-                deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
-                recent_action_count=len(context.provider_prompt.get("recent_actions", [])),
-                hand_count=len(context.provider_prompt.get("snapshot", {}).get("hand", []))
-                if isinstance(context.provider_prompt.get("snapshot"), dict)
-                else None,
-            )
             provider_action = self._request_provider(context.provider_prompt)
             action, fallback_used = self._select_action(provider_action, context)
             debug_event(
@@ -274,13 +263,16 @@ class LlmAgentPlayer(Player):
     ) -> JsonObject:
         players_by_seat = _players_by_seat_from_request(request)
         user_name = _user_name(table_context, players_by_seat, memory)
+        model_role = _action_model_role(table_context, strategy_context)
+        model = self.config.resolved_model(model_role)
         return {
             "request_id": request.request_id,
             "snapshot": model_snapshot(request.snapshot),
-            "techniques": _memory_techniques(memory),
+            "techniques": _l2_memory_techniques(memory),
             "table_context": table_context,
             "strategy_context": strategy_context,
-            "personality": personality,
+#            "personality": personality,
+#            "player_profiles": _other_player_profiles(memory, table_context, players_by_seat, user_name),
             "players_by_seat": players_by_seat,
             "recent_actions": _recent_current_deal_actions(
                 action_log,
@@ -288,12 +280,14 @@ class LlmAgentPlayer(Player):
                 deal_id=public_value(request, "deal_id"),
             ),
             "system_prompt": SYSTEM_PROMPT,
-            "player_profiles": _other_player_profiles(memory, table_context, players_by_seat, user_name),
             "model": {
-                "provider": self.config.provider_name,
-                "name": self.config.model_name,
-                "temperature": self.config.temperature,
-                "max_output_tokens": self.config.max_output_tokens,
+                "provider": model.provider_name,
+                "role": model.role,
+                "name": model.model_name,
+                "temperature": model.temperature,
+                "timeout_seconds": model.timeout_seconds,
+                "max_output_tokens": model.max_output_tokens,
+                "model_reasoning_effort": model.model_reasoning_effort,
             },
         }
 
@@ -301,16 +295,8 @@ class LlmAgentPlayer(Player):
         started = time.perf_counter()
         request_id = str(prompt.get("request_id") or "")
         table_context = prompt.get("table_context") if isinstance(prompt.get("table_context"), dict) else {}
+        model = prompt.get("model") if isinstance(prompt.get("model"), dict) else {}
         deadline_epoch_ms = table_context.get("action_deadline_epoch_ms")
-        trace_event(
-            "llm_player.provider_started",
-            request_id=request_id,
-            table_id=table_context.get("table_id"),
-            seat=table_context.get("seat"),
-            provider=self.config.provider_name,
-            model=self.config.model_name,
-            **deadline_fields(deadline_epoch_ms),
-        )
         try:
             action = self.provider.choose_action(prompt)
         except Exception as exc:
@@ -319,24 +305,14 @@ class LlmAgentPlayer(Player):
                 request_id=request_id,
                 table_id=table_context.get("table_id"),
                 seat=table_context.get("seat"),
-                provider=self.config.provider_name,
-                model=self.config.model_name,
+                provider=model.get("provider") or self.config.resolved_model("fast").provider_name,
+                model=model.get("name") or self.config.resolved_model("fast").model_name,
+                model_role=model.get("role"),
                 duration_ms=elapsed_ms(started),
                 deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             return {"type": "error", "message": str(exc)}
-        debug_event(
-            "llm_player.provider_completed",
-            request_id=request_id,
-            table_id=table_context.get("table_id"),
-            seat=table_context.get("seat"),
-            provider=self.config.provider_name,
-            model=self.config.model_name,
-            duration_ms=elapsed_ms(started),
-            deadline_remaining_ms=deadline_remaining_ms(deadline_epoch_ms),
-            response_type=action.get("type") if isinstance(action, dict) else type(action).__name__,
-        )
         return action if isinstance(action, dict) else {"type": "error", "message": "provider returned non-object"}
 
     def _update_memory(
@@ -367,7 +343,6 @@ class LlmAgentPlayer(Player):
             memory["seat"] = seat
             players_by_seat = _players_by_seat_from_request(request)
             observer_name = self.config.display_name_for(seat)
-        _apply_score_events(memory, events or [])
         if events and action_log is not None:
             self.memory_agent.process_deal(
                 memory,
@@ -403,9 +378,25 @@ def _llm_output_for_log(provider_action: JsonObject) -> JsonObject:
     return output
 
 
-def _memory_techniques(memory: JsonObject) -> JsonObject:
+def _l2_memory_techniques(memory: JsonObject) -> JsonObject:
     techniques = memory.get("techniques")
+    if isinstance(techniques, dict):
+        techniques = techniques.get("level2")
     return techniques if isinstance(techniques, dict) else {}
+
+
+def _action_model_role(table_context: JsonObject, strategy_context: JsonObject) -> str:
+    pressure = strategy_context.get("pressure")
+    if isinstance(pressure, dict) and (
+        pressure.get("endgame_defense") is True or pressure.get("partner_near_finish") is True
+    ):
+        return "pro"
+    if str(table_context.get("current_level") or "").upper() == "A":
+        return "pro"
+    level_by_team = table_context.get("level_by_team")
+    if isinstance(level_by_team, dict) and any(str(level).upper() == "A" for level in level_by_team.values()):
+        return "pro"
+    return "fast"
 
 
 def _other_player_profiles(
@@ -496,34 +487,6 @@ def _has_deal_boundary(entry: JsonObject) -> bool:
         isinstance(event, dict) and event.get("type") in {"DealStarted", "DealEnded", "MatchEnded"}
         for event in events
     )
-
-
-def _apply_score_events(memory: JsonObject, events: list[JsonObject]) -> None:
-    score = memory.get("score")
-    if not isinstance(score, dict):
-        score = {}
-    for event in events:
-        if event.get("type") == "DealEnded":
-            score["deals_played"] = int(score.get("deals_played", 0)) + 1
-            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-            finish_order = payload.get("finish_order", [])
-            if isinstance(finish_order, list):
-                score["last_finish_order"] = finish_order
-            seat = memory.get("seat")
-            winning_team = payload.get("winning_team")
-            if isinstance(seat, str) and team_for_seat(seat) == winning_team:
-                score["wins"] = int(score.get("wins", 0)) + 1
-        elif event.get("type") == "LevelAdvanced":
-            levels = score.get("level_by_team")
-            if not isinstance(levels, dict):
-                levels = {}
-            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-            team = payload.get("team")
-            next_level = payload.get("next_level")
-            if isinstance(team, str) and isinstance(next_level, str):
-                levels[team] = next_level
-            score["level_by_team"] = levels
-    memory["score"] = score
 
 
 def _events_from_observation(observation: JsonObject) -> list[JsonObject]:
