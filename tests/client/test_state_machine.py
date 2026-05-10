@@ -158,6 +158,76 @@ class StateMachineTransitionTests(unittest.TestCase):
         self.assertIn("Match 1 complete.", output)
         self.assertIn("Match 2 started.", output)
 
+    def test_new_deal_prefetches_human_lead_hand(self) -> None:
+        class Client:
+            def __init__(self) -> None:
+                self.calls: list[tuple] = []
+
+            def start(self, table_id):
+                self.calls.append(("start", table_id))
+                return {
+                    "events": [{"seq": 5, "type": "DealStarted", "payload": {"leader": "E"}}],
+                    "snapshot": {
+                        "table_id": table_id,
+                        "phase": "PLAYING",
+                        "event_seq": 5,
+                        "deal_id": 2,
+                        "current_turn": "E",
+                        "acting_seat": "E",
+                        "level_by_team": {"EW": "2", "SN": "2"},
+                        "hand_counts": {"E": 3, "S": 1, "W": 1, "N": 1},
+                    },
+                }
+
+            def table_snapshot(self, table_id):
+                self.calls.append(("table_snapshot", table_id))
+                return {
+                    "table_id": table_id,
+                    "phase": "DEAL_COMPLETE",
+                    "event_seq": 4,
+                    "deal_id": 1,
+                    "current_turn": None,
+                }
+
+            def seat_snapshot(self, table_id, seat, controller_id):
+                self.calls.append(("seat_snapshot", table_id, seat, controller_id))
+                return {
+                    "public": {
+                        "table_id": table_id,
+                        "phase": "PLAYING",
+                        "event_seq": 5,
+                        "deal_id": 2,
+                        "current_turn": "E",
+                        "acting_seat": "E",
+                        "level_by_team": {"EW": "2", "SN": "2"},
+                        "hand_counts": {"E": 3, "S": 1, "W": 1, "N": 1},
+                    },
+                    "seat": seat,
+                    "hand": ["D1-H-4", "D1-C-3", "D2-S-3"],
+                    "legal_action": "lead",
+                }
+
+        table = Table("table-1")
+        session = Session("table-1", "E", "human-controller-E", RotatingBroker(), {}, table=table)
+        output: list[str] = []
+        client = Client()
+        machine = StateMachine(
+            args=SimpleNamespace(max_bot_actions=4),
+            client=client,
+            session=session,
+            input_fn=lambda prompt: "quit",
+            emit=output.append,
+        )
+
+        next_snapshot = machine._start_and_drive_next_deal()
+        seat_snapshot, command = machine._read_human_command()
+
+        self.assertEqual(next_snapshot["phase"], "PLAYING")
+        self.assertEqual(seat_snapshot["legal_action"], "lead")
+        self.assertEqual(command, "quit")
+        self.assertEqual(client.calls.count(("seat_snapshot", "table-1", "E", "human-controller-E")), 1)
+        self.assertTrue(any("Hand: " in line and "4" in line for line in output))
+
     def test_role_observers_run_gossiper_then_witnesses_after_player_action(self) -> None:
         observed: list[tuple[str, str]] = []
 

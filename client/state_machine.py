@@ -56,10 +56,12 @@ class StateMachine:
         self.emit = emit
         self.deal_number = 1
         self._last_recorded_event_seq: int | None = None
+        self._prefetched_human_snapshot: JsonObject | None = None
 
     def run(self, public_snapshot: JsonObject) -> JsonObject:
         trace_event("client.state_machine.run_started", **_state_machine_log_fields(self.session, public_snapshot))
         try:
+            self._prefetch_human_lead_snapshot(public_snapshot)
             current = self._drive_bot_turns(public_snapshot)
             while True:
                 state = self._machine_state(current)
@@ -164,6 +166,7 @@ class StateMachine:
         current = self._start_next_deal()
         self._record_table_transitions(current)
         self._emit_table(current)
+        self._prefetch_human_lead_snapshot(current)
         return self._drive_bot_turns(current)
 
     def _start_and_drive_next_match(self, snapshot: JsonObject) -> JsonObject:
@@ -172,6 +175,7 @@ class StateMachine:
         current = self._start_next_match()
         self._record_table_transitions(current)
         self._emit_table(current)
+        self._prefetch_human_lead_snapshot(current)
         return self._drive_bot_turns(current)
 
     def _emit_table(self, snapshot: JsonObject) -> None:
@@ -276,18 +280,40 @@ class StateMachine:
         return self._submit_human_turn(command, seat_snapshot)
 
     def _read_human_command(self) -> tuple[JsonObject, str | None]:
-        seat_snapshot = self.client.seat_snapshot(
-            self.session.table_id,
-            self.session.human_seat,
-            self.session.human_controller_id,
-        )
-        self.emit(format_seat_snapshot(seat_snapshot, npc_metadata=self.session.npc_metadata).rstrip())
+        if self._prefetched_human_snapshot is not None:
+            seat_snapshot = self._prefetched_human_snapshot
+            self._prefetched_human_snapshot = None
+        else:
+            seat_snapshot = self.client.seat_snapshot(
+                self.session.table_id,
+                self.session.human_seat,
+                self.session.human_controller_id,
+            )
+            self.emit(format_seat_snapshot(seat_snapshot, npc_metadata=self.session.npc_metadata).rstrip())
         self._emit_gossiper_advice(seat_snapshot)
         try:
             raw_command = read_command(self.input_fn, "guandan> ", input_deadline_epoch_ms(seat_snapshot))
         except EOFError:
             return seat_snapshot, "quit"
         return seat_snapshot, raw_command
+
+    def _prefetch_human_lead_snapshot(self, public_snapshot: JsonObject) -> None:
+        self._prefetched_human_snapshot = None
+        if self.session.watches_llm_player:
+            return
+        if public_snapshot.get("phase") != "PLAYING":
+            return
+        if snapshot_acting_seat(public_snapshot) != self.session.human_seat:
+            return
+        seat_snapshot = self.client.seat_snapshot(
+            self.session.table_id,
+            self.session.human_seat,
+            self.session.human_controller_id,
+        )
+        if seat_snapshot.get("legal_action") != "lead":
+            return
+        self._prefetched_human_snapshot = seat_snapshot
+        self.emit(format_seat_snapshot(seat_snapshot, npc_metadata=self.session.npc_metadata).rstrip())
 
     def _emit_gossiper_advice(self, seat_snapshot: JsonObject) -> None:
         gossiper = self.session.table.members_for(self.session.human_seat).gossiper
