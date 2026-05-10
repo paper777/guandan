@@ -7,6 +7,7 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
-ui/.godot/
-ui/.import/
-ui/export_presets.cfg
+.godot/
+.import/
+export_presets.cfg
+.DS_Store
