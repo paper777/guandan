@@ -1,4 +1,5 @@
 actions.json
+models/
 *.jsonl
 memory.json
 llm_config.json

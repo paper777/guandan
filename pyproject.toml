@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 guandan-cli = "client.cli:main"
 guandan-server = "server.server:main"
+guandan-bc-collect = "training.collect:main"
+guandan-bc-train = "training.bc_train:main"
+guandan-ppo-train = "training.ppo_train:main"
 
 [project.optional-dependencies]
 dev = [
@@ -25,6 +28,9 @@ dev = [
 api = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
+]
+train = [
+  "torch>=2.3",
 ]
 
 [dependency-groups]
@@ -51,6 +57,7 @@ packages = [
   "npc.common",
   "npc.dummy_bot",
   "npc.llm_agent",
+  "training",
 ]
 
 [tool.setuptools.package-dir]
@@ -70,6 +77,7 @@ npc = "npc"
 "npc.common" = "npc/common"
 "npc.dummy_bot" = "npc/dummy_bot"
 "npc.llm_agent" = "npc/llm_agent"
+training = "training"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "npc"]
