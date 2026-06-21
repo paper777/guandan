@@ -16,11 +16,12 @@ Refactor NPC players around a shared abstract `Player`, split the LLM agent into
 - [x] Implement real stdlib HTTP adapters for OpenAI/Codex, Claude, and Doubao.
 - [x] Keep deterministic LLM behavior available for offline tests and local dry runs.
 - [x] Add broker helpers for default NPC lineups.
-- [x] Define the mixed default lineup as `Ming` dummy bot plus `Jade`, `River`, and `Atlas` LLM agents.
+- [x] Define the original mixed lineup as `Ming` dummy bot plus `Jade`, `River`, and `Atlas` LLM agents.
+- [x] Replace the runtime default NPC lineup with `rl`; default profiles now use RL agent players with heuristic fallback.
 - [x] Make the player lineup configurable through `data/players.json`.
 - [x] Support signed-in Codex CLI as `provider_name: "codex-cli"` without an API key.
 - [x] Integrate a card-player advisor into `LlmAgentPlayer` prompts and fallback policy.
-- [x] Add CLI `--npc-lineup` with `mixed`, `dummy`, and `llm` choices.
+- [x] Add CLI `--npc-lineup` with `mixed`, `dummy`, `llm`, and `rl` choices.
 - [x] Create `skills/card-record/SKILL.md` for using `common.card_recorder`.
 - [x] Add tests for player inheritance, model adapters, prompts, broker lineups, CLI lineup selection, and skill metadata.
 - [x] Run `uv run python -m unittest discover -s npc`.

@@ -17,6 +17,7 @@ Source layout:
 - `server/services/`: table actor, lobby, replay, and snapshot filtering.
 - `server/persistence/`: SQLite models and repositories.
 - `npc/`: external NPC policy implementations and policy server helpers.
+- `npc/rl_agent/`: runtime learned NPC policy, model loader, and HTTP policy server.
 - `training/`: in-process self-play environment, legal-action feature encoding, heuristic baseline, behavior cloning collection/training, and PPO training scaffolds.
 - `tests/`: unit, property, and integration tests mirroring source modules.
 
@@ -36,9 +37,11 @@ Key commands:
 - `uv run guandan-server --reload`: run the local API server through the packaged entrypoint.
 - `uv run uvicorn server.app.main:app --reload`: run the local API server directly with uvicorn.
 - `python3 -m unittest discover -s tests/training`: run training pipeline tests.
-- `uv run --extra train guandan-bc-collect data/bc/heuristic.jsonl --seed 1 --seed 2 --max-deals 1`: collect heuristic behavior-cloning samples.
-- `uv run --extra train guandan-bc-train data/bc/heuristic.jsonl data/models/bc_ranker.pt --epochs 3 --device cuda`: train the behavior-cloning candidate ranker with CUDA.
-- `uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt --seed 1 --seed 2 --updates 10 --max-deals 1 --device cuda`: run self-play PPO training with CUDA.
+- `uv run --extra train guandan-bc-collect data/bc/heuristic.compact.jsonl.gz --seed-count 8 --max-deals 1 --workers 4 --compact`: collect compact heuristic behavior-cloning samples in parallel by seed.
+- `uv run --extra train guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc/heuristic.bc-cache --shard-size 2048`: convert BC JSONL to tensor shard cache.
+- `uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --device cuda`: train the behavior-cloning candidate ranker with CUDA from tensor cache.
+- `uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --device cuda`: run self-play PPO fine-tuning with CUDA from the BC policy checkpoint.
+- `uv run --extra train guandan-rl-agent-server --model-path data/models/ppo_actor_critic.pt --device cuda`: run the learned NPC policy server with heuristic fallback.
 - `nvidia-smi`: verify the local NVIDIA GPU and driver before CUDA training.
 
 Document any command changes in this file when tooling is introduced.

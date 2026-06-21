@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from typing import Any
 from urllib.parse import parse_qs
 
+from common.log import audit_log_enabled, make_audit_entry, parse_json_body, write_audit_entry
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
@@ -25,6 +27,44 @@ async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         return
     if scope["type"] != "http":
         raise RuntimeError(f"unsupported scope type: {scope['type']}")
+    if audit_log_enabled():
+        await _audit_http(scope, receive, send)
+        return
+    await _http(scope, receive, send)
+
+
+async def _audit_http(scope: dict[str, Any], receive: Any, send: Any) -> None:
+    started_at = time.monotonic()
+    request_body = await _read_body(receive)
+    response_body = b""
+    status = 500
+
+    async def audit_send(message: dict[str, Any]) -> None:
+        nonlocal response_body, status
+        if message["type"] == "http.response.start":
+            status = int(message["status"])
+        if message["type"] == "http.response.body":
+            response_body += message.get("body", b"")
+        await send(message)
+
+    try:
+        await _http(scope, _receive_once(request_body), audit_send)
+    finally:
+        write_audit_entry(
+            make_audit_entry(
+                method=str(scope.get("method", "GET")),
+                path=str(scope.get("path", "")),
+                query=scope.get("query_string", b"").decode(),
+                status=status,
+                started_at=started_at,
+                request_body=parse_json_body(request_body),
+                response_body=parse_json_body(response_body),
+                client=scope.get("client"),
+            )
+        )
+
+
+async def _http(scope: dict[str, Any], receive: Any, send: Any) -> None:
     method = scope.get("method", "GET")
     path = scope.get("path", "")
     if path == "/health":
@@ -158,13 +198,7 @@ def _to_jsonable(value: Any) -> Any:
 
 
 async def _read_json(receive: Any) -> dict[str, Any] | None:
-    chunks: list[bytes] = []
-    while True:
-        message = await receive()
-        chunks.append(message.get("body", b""))
-        if not message.get("more_body", False):
-            break
-    raw = b"".join(chunks)
+    raw = await _read_body(receive)
     if not raw:
         return {}
     try:
@@ -172,6 +206,29 @@ async def _read_json(receive: Any) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
+
+
+async def _read_body(receive: Any) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        message = await receive()
+        chunks.append(message.get("body", b""))
+        if not message.get("more_body", False):
+            break
+    return b"".join(chunks)
+
+
+def _receive_once(body: bytes) -> Any:
+    sent = False
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
 
 
 def _table_config_from_body(body: dict[str, Any]) -> TableConfig:

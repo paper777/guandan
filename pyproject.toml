@@ -17,8 +17,10 @@ dependencies = [
 guandan-cli = "client.cli:main"
 guandan-server = "server.server:main"
 guandan-bc-collect = "training.collect:main"
+guandan-bc-cache = "training.bc_cache:main"
 guandan-bc-train = "training.bc_train:main"
 guandan-ppo-train = "training.ppo_train:main"
+guandan-rl-agent-server = "npc.rl_agent.server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -57,6 +59,7 @@ packages = [
   "npc.common",
   "npc.dummy_bot",
   "npc.llm_agent",
+  "npc.rl_agent",
   "training",
 ]
 
@@ -77,6 +80,7 @@ npc = "npc"
 "npc.common" = "npc/common"
 "npc.dummy_bot" = "npc/dummy_bot"
 "npc.llm_agent" = "npc/llm_agent"
+"npc.rl_agent" = "npc/rl_agent"
 training = "training"
 
 [tool.pytest.ini_options]

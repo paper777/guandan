@@ -51,6 +51,7 @@ The current training pipeline includes:
 - behavior-cloning sample collection: `training/collect.py`
 - behavior-cloning trainer: `training/bc_train.py`
 - self-play rollout and PPO scaffold: `training/rollout.py`, `training/ppo_train.py`
+- runtime RL NPC player: `npc/rl_agent/player.py`
 
 Install/use the training extra through `uv run --extra train ...`. Verify GPU availability first:
 
@@ -62,19 +63,31 @@ uv run --extra train python -c "import torch; print(torch.__version__); print(to
 Collect behavior-cloning samples:
 
 ```bash
-uv run --extra train guandan-bc-collect data/bc/heuristic.jsonl --seed 1 --seed 2 --max-deals 1
+uv run --extra train guandan-bc-collect data/bc/heuristic.compact.jsonl.gz --seed-count 8 --max-deals 1 --workers 4 --compact
+```
+
+Build a tensor shard cache for repeated training:
+
+```bash
+uv run --extra train guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc/heuristic.bc-cache --shard-size 2048
 ```
 
 Train the behavior-cloning candidate ranker on CUDA:
 
 ```bash
-uv run --extra train guandan-bc-train data/bc/heuristic.jsonl data/models/bc_ranker.pt --epochs 3 --device cuda
+uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --device cuda
 ```
 
-Run a PPO self-play training smoke run on CUDA:
+Run a PPO self-play fine-tuning run on CUDA:
 
 ```bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt --seed 1 --seed 2 --updates 10 --max-deals 1 --device cuda
+uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --device cuda
+```
+
+Run the learned NPC policy server, with heuristic fallback when the checkpoint is unavailable:
+
+```bash
+uv run --extra train guandan-rl-agent-server --model-path data/models/ppo_actor_critic.pt --device cuda
 ```
 
 Recent GPU smoke outputs:

@@ -5,9 +5,10 @@ from pathlib import Path
 from db.player.types import Player, PlayerProfile
 from npc.dummy_bot.player import DummyBotPlayer
 from npc.llm_agent import LlmAgentConfig, LlmAgentPlayer, ModelSettings
+from npc.rl_agent import RlAgentConfig, RlAgentPlayer
 
 
-NPC_LINEUPS = ("mixed", "dummy", "llm")
+NPC_LINEUPS = ("mixed", "dummy", "llm", "rl")
 
 
 def player_for_profile(profile: PlayerProfile, lineup: str, storage_dir: str | Path = Path("data")) -> Player:
@@ -16,6 +17,15 @@ def player_for_profile(profile: PlayerProfile, lineup: str, storage_dir: str | P
     kind = profile.kind if lineup == "mixed" else lineup
     if kind == "dummy":
         return DummyBotPlayer()
+    if kind == "rl":
+        return RlAgentPlayer(
+            RlAgentConfig(
+                player_name=profile.display_name,
+                seat=profile.preferred_seat,
+                model_path=_rl_model_path(profile),
+                device=_optional_profile_str(profile, "rl_device", "device"),
+            )
+        )
     llm = profile.llm_config
     provider_name = llm.play_fast.provider_name or "deterministic"
     base_model = llm.play_fast.model_name or _default_model_for_provider(provider_name)
@@ -105,3 +115,18 @@ def _default_model_for_provider(provider_name: str) -> str:
     if provider_name in {"glm", "bigmodel", "zhipu", "zhipuai"}:
         return "glm-5.1"
     return "deterministic-guandan-v1"
+
+
+def _rl_model_path(profile: PlayerProfile) -> Path | None:
+    value = _optional_profile_str(profile, "rl_model_path", "model_path")
+    return Path(value).expanduser() if value is not None else None
+
+
+def _optional_profile_str(profile: PlayerProfile, *keys: str) -> str | None:
+    for key in keys:
+        value = profile.extra.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    return None

@@ -9,6 +9,7 @@ from client.broker import NpcBroker
 from db.player import Player, load_player_profiles
 from npc.dummy_bot import DummyBotPlayer
 from npc.llm_agent import LlmAgentPlayer
+from npc.rl_agent import RlAgentPlayer
 
 
 class FakeClient:
@@ -32,8 +33,8 @@ class FakeClient:
             "legal_action": "lead",
         }
 
-    def play_cards(self, table_id, seat, controller_id, card_ids):
-        self.calls.append(("play_cards", table_id, seat, controller_id, card_ids))
+    def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
+        self.calls.append(("play_cards", table_id, seat, controller_id, card_ids, declared_type))
         return {}
 
     def pass_turn(self, table_id, seat, controller_id):
@@ -59,29 +60,29 @@ class NpcBrokerTests(unittest.TestCase):
         self.assertEqual([seat.display_name for seat in seats], ["Ming", "Jade", "River", "Atlas"])
         self.assertEqual([seat.seat for seat in seats], ["W", "E", "S", "N"])
         self.assertEqual([seat.profile_seat for seat in seats], ["E", "S", "W", "N"])
-        self.assertIsInstance(broker.seats["W"].policy, DummyBotPlayer)
-        self.assertIsInstance(broker.seats["E"].policy, LlmAgentPlayer)
-        self.assertIsInstance(broker.seats["S"].policy, LlmAgentPlayer)
-        self.assertIsInstance(broker.seats["N"].policy, LlmAgentPlayer)
+        self.assertIsInstance(broker.seats["W"].policy, RlAgentPlayer)
+        self.assertIsInstance(broker.seats["E"].policy, RlAgentPlayer)
+        self.assertIsInstance(broker.seats["S"].policy, RlAgentPlayer)
+        self.assertIsInstance(broker.seats["N"].policy, RlAgentPlayer)
         self.assertIsInstance(broker.seats["W"].policy, Player)
-        self.assertEqual(broker.seats["E"].policy.config.personality, "aggressive")
         self.assertEqual(broker.seats["E"].policy.config.seat, "E")
-        self.assertEqual(broker.seats["S"].policy.config.personality, "balanced")
         self.assertEqual(broker.seats["S"].policy.config.seat, "S")
-        self.assertEqual(broker.seats["N"].policy.config.personality, "defensive")
         self.assertEqual(broker.seats["N"].policy.config.seat, "N")
 
-    def test_lineups_can_force_all_dummy_or_all_llm(self) -> None:
+    def test_lineups_can_force_all_dummy_llm_or_rl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             player_db_path = Path(tmp) / "players.json"
             dummy_broker = NpcBroker(FakeClient(), "table-1", player_db_path=player_db_path)
             llm_broker = NpcBroker(FakeClient(), "table-1", player_db_path=player_db_path)
+            rl_broker = NpcBroker(FakeClient(), "table-1", player_db_path=player_db_path)
 
             dummy_broker.add_players(("S", "W"), lineup="dummy", shuffle_seed=0)
             llm_broker.add_players(("S", "W"), lineup="llm", shuffle_seed=0)
+            rl_broker.add_players(("S", "W"), lineup="rl", shuffle_seed=0)
 
         self.assertTrue(all(isinstance(seat.policy, DummyBotPlayer) for seat in dummy_broker.seats.values()))
         self.assertTrue(all(isinstance(seat.policy, LlmAgentPlayer) for seat in llm_broker.seats.values()))
+        self.assertTrue(all(isinstance(seat.policy, RlAgentPlayer) for seat in rl_broker.seats.values()))
 
     def test_player_profiles_can_be_loaded_from_database(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,7 +264,7 @@ class NpcBrokerTests(unittest.TestCase):
                 ("join_agent", "table-1", "S", "Dummy S"),
                 ("ready", "table-1", "S", "c-S"),
                 ("seat_snapshot", "table-1", "S", "c-S"),
-                ("play_cards", "table-1", "S", "c-S", ("D1-S-3",)),
+                ("play_cards", "table-1", "S", "c-S", ("D1-S-3",), None),
             ],
         )
 
@@ -309,7 +310,7 @@ class NpcBrokerTests(unittest.TestCase):
             client.calls,
             [
                 ("seat_snapshot", "table-1", "W", "c-W"),
-                ("play_cards", "table-1", "W", "c-W", ("D1-S-3",)),
+                ("play_cards", "table-1", "W", "c-W", ("D1-S-3",), None),
             ],
         )
 
@@ -354,8 +355,8 @@ class NpcBrokerTests(unittest.TestCase):
                 snapshot["public"]["seats"] = _named_seats()
                 return snapshot
 
-            def play_cards(self, table_id, seat, controller_id, card_ids):
-                response = super().play_cards(table_id, seat, controller_id, card_ids)
+            def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
+                response = super().play_cards(table_id, seat, controller_id, card_ids, declared_type=declared_type)
                 response["snapshot"] = {"seats": _named_seats()}
                 return response
 

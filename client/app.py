@@ -95,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument(
         "--npc-lineup",
         choices=NPC_LINEUPS,
-        default="mixed",
+        default="rl",
         help="NPC lineup for broker-controlled seats.",
     )
     play.add_argument(

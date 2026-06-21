@@ -10,7 +10,7 @@ JsonObject = dict[str, Any]
 
 
 class Player(ABC):
-    """Broker-compatible player implementation for dummy bots and LLM agents."""
+    """Broker-compatible player implementation for NPC policies."""
 
     @abstractmethod
     def choose_action(self, request: Any) -> JsonObject:

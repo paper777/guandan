@@ -83,7 +83,7 @@ class NpcBroker:
         self,
         seats: tuple[str, ...] | list[str] | None = None,
         *,
-        lineup: str = "mixed",
+        lineup: str = "rl",
         storage_dir: str | Path = Path("data"),
         config_path: str | Path | None = None,
         shuffle_seed: object = None,
@@ -394,7 +394,7 @@ def main() -> None:
     parser.add_argument("--server-url", default="http://127.0.0.1:8000")
     parser.add_argument("--table-id", required=True)
     parser.add_argument("--seats", default="E,S,W,N", help="Comma-separated seats to control.")
-    parser.add_argument("--lineup", choices=NPC_LINEUPS, default="mixed", help="Default NPC player lineup.")
+    parser.add_argument("--lineup", choices=NPC_LINEUPS, default="rl", help="Default NPC player lineup.")
     parser.add_argument(
         "--player-config",
         default=str(PLAYER_DATABASE_PATH),

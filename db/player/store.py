@@ -14,10 +14,10 @@ PLAYER_DATABASE_PATH = Path("data")
 PLAYER_INDEX_FILE = "players.json"
 PLAYER_STORAGE_FILES = ("actions.json", "llm_config.json", "memory.json", "profile.json", "statistics.json")
 DEFAULT_PLAYER_PROFILES = (
-    PlayerProfile("Ming", "dummy", profile_key="Ming", preferred_seat="E", personality="balanced"),
-    PlayerProfile("Jade", "llm", profile_key="Jade", preferred_seat="S", personality="aggressive"),
-    PlayerProfile("River", "llm", profile_key="River", preferred_seat="W", personality="balanced"),
-    PlayerProfile("Atlas", "llm", profile_key="Atlas", preferred_seat="N", personality="defensive"),
+    PlayerProfile("Ming", "rl", profile_key="Ming", preferred_seat="E", personality="balanced"),
+    PlayerProfile("Jade", "rl", profile_key="Jade", preferred_seat="S", personality="aggressive"),
+    PlayerProfile("River", "rl", profile_key="River", preferred_seat="W", personality="balanced"),
+    PlayerProfile("Atlas", "rl", profile_key="Atlas", preferred_seat="N", personality="defensive"),
 )
 
 
@@ -137,7 +137,7 @@ def _profiles_from_items(items: list[object]) -> list[PlayerProfile]:
         seen_keys.add(profile_key)
 
         kind = str(item.get("kind") or fallback.kind).lower()
-        if kind not in {"dummy", "llm"}:
+        if kind not in {"dummy", "llm", "rl"}:
             raise ValueError(f"invalid player kind for {display_name}: {kind}")
         profiles.append(
             PlayerProfile(

@@ -1,5 +1,5 @@
 {
   "display_name": "Atlas",
-  "kind": "llm",
+  "kind": "rl",
   "personality": "defensive"
 }

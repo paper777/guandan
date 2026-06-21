@@ -1,5 +1,5 @@
 {
   "display_name": "Jade",
-  "kind": "llm",
+  "kind": "rl",
   "personality": "aggressive"
 }

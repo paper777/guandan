@@ -268,11 +268,11 @@ class LlmAgentPlayer(Player):
         return {
             "request_id": request.request_id,
             "snapshot": model_snapshot(request.snapshot),
-            "techniques": _l2_memory_techniques(memory),
+            "techniques": _memory_techniques(memory),
             "table_context": table_context,
             "strategy_context": strategy_context,
-#            "personality": personality,
-#            "player_profiles": _other_player_profiles(memory, table_context, players_by_seat, user_name),
+            "personality": personality,
+            "player_profiles": _other_player_profiles(memory, table_context, players_by_seat, user_name),
             "players_by_seat": players_by_seat,
             "recent_actions": _recent_current_deal_actions(
                 action_log,
@@ -378,10 +378,8 @@ def _llm_output_for_log(provider_action: JsonObject) -> JsonObject:
     return output
 
 
-def _l2_memory_techniques(memory: JsonObject) -> JsonObject:
+def _memory_techniques(memory: JsonObject) -> JsonObject:
     techniques = memory.get("techniques")
-    if isinstance(techniques, dict):
-        techniques = techniques.get("level2")
     return techniques if isinstance(techniques, dict) else {}
 
 

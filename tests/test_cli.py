@@ -212,7 +212,7 @@ def _play_args(**overrides):
         "controller_id": None,
         "display_name": None,
         "player_mode": "human",
-        "npc_lineup": "mixed",
+        "npc_lineup": "rl",
         "npc_player_config": None,
     }
     values.update(overrides)
@@ -277,7 +277,7 @@ class CommandLineClientTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             run_cli(["--seat", "S"], input_fn=lambda prompt: "quit", client=FakeClient())
 
-    def test_default_play_creates_human_and_three_mixed_broker_agents(self) -> None:
+    def test_default_play_creates_human_and_three_rl_broker_agents(self) -> None:
         client = FakeClient()
 
         result = run_cli([], input_fn=lambda prompt: "quit", client=client)
@@ -291,7 +291,7 @@ class CommandLineClientTests(unittest.TestCase):
         self.assertIn("Jade 1", result.output)
         self.assertIn("River 1", result.output)
         self.assertIn("Atlas 1", result.output)
-        self.assertIn("codex-cli/", result.output)
+        self.assertIn("rl-agent/heuristic-fallback", result.output)
         self.assertIn("Hand: ♠️ 3  ♣️ 3  ♥️ 4", result.output)
         self.assertIn(("join_human", "table-1", "E", "human-E", "human-controller-E", login_name), client.calls)
         join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Iterable, Literal
+from typing import Iterable, Literal, TYPE_CHECKING
 
 from server.domain.cards import CARD_BY_ID, STANDARD_RANKS, Rank, is_red_heart_level_card, resolve_cards
 from server.domain.commands import Pass, PlayCards, ReturnTribute, SubmitTribute
@@ -10,6 +10,9 @@ from server.domain.comparator import RankContext, can_beat
 from server.domain.hand_types import SEQUENCE_RANKS, HandType, PlayedHand, parse_hand
 from server.domain.seats import Seat, team_for_seat
 from server.domain.state import MatchPhase, MatchState, TributeObligation
+
+if TYPE_CHECKING:
+    from server.services.snapshots import SeatSnapshot
 
 
 ActionKind = Literal["play_cards", "pass", "submit_tribute", "return_tribute"]
@@ -57,6 +60,29 @@ def legal_actions_for_state(state: MatchState, seat: Seat) -> tuple[ActionCandid
         return _playing_actions(state, seat)
     if state.phase == MatchPhase.TRIBUTE and state.deal.tribute is not None and state.deal.turn == seat:
         return _tribute_actions(state, seat)
+    return ()
+
+
+def legal_actions_for_snapshot(snapshot: SeatSnapshot) -> tuple[ActionCandidate, ...]:
+    """Generate legal candidates from the runtime-visible seat snapshot only."""
+    if snapshot.legal_action == "lead":
+        return _play_actions(snapshot.hand, snapshot.public.current_level, None)
+    if snapshot.legal_action == "play_or_pass":
+        current = _current_play_from_snapshot(snapshot)
+        if current is None:
+            return (ActionCandidate(kind="pass"),)
+        return _sort_actions(
+            (
+                ActionCandidate(kind="pass"),
+                *_play_actions(snapshot.hand, snapshot.public.current_level, current),
+            )
+        )
+    if snapshot.legal_action == "tribute":
+        eligible = snapshot.eligible_card_ids or _highest_eligible_tribute_cards(snapshot.hand, snapshot.public.current_level)
+        return tuple(ActionCandidate(kind="submit_tribute", card_ids=(card_id,), length=1) for card_id in eligible)
+    if snapshot.legal_action == "return_tribute":
+        eligible = snapshot.eligible_card_ids or _eligible_return_cards_from_snapshot(snapshot)
+        return tuple(ActionCandidate(kind="return_tribute", card_ids=(card_id,), length=1) for card_id in eligible)
     return ()
 
 
@@ -389,6 +415,21 @@ def _pending_return_obligation(
     return None
 
 
+def _current_play_from_snapshot(snapshot: SeatSnapshot) -> PlayedHand | None:
+    trick = snapshot.public.current_trick or {}
+    raw_card_ids = trick.get("card_ids")
+    raw_hand_type = trick.get("hand_type")
+    if not isinstance(raw_card_ids, (list, tuple)) or not isinstance(raw_hand_type, str):
+        return None
+    card_ids = tuple(str(card_id) for card_id in raw_card_ids)
+    if not card_ids:
+        return None
+    try:
+        return parse_hand(resolve_cards(card_ids), raw_hand_type, level=snapshot.public.current_level)
+    except ValueError:
+        return None
+
+
 def _highest_eligible_tribute_cards(card_ids: tuple[str, ...], level: Rank) -> tuple[str, ...]:
     ctx = RankContext(level)
     eligible = tuple(
@@ -404,6 +445,12 @@ def _eligible_return_cards(card_ids: tuple[str, ...], obligation: TributeObligat
     if team_for_seat(obligation.giver) != team_for_seat(obligation.receiver):
         return card_ids
     return tuple(card_id for card_id in card_ids if _rank_at_most_ten(card_id))
+
+
+def _eligible_return_cards_from_snapshot(snapshot: SeatSnapshot) -> tuple[str, ...]:
+    if not snapshot.return_rank_at_most_ten:
+        return snapshot.hand
+    return tuple(card_id for card_id in snapshot.hand if _rank_at_most_ten(card_id))
 
 
 def _rank_at_most_ten(card_id: str) -> bool:

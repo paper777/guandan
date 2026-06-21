@@ -6,10 +6,11 @@ from server.domain.cards import CARD_BY_ID, Rank
 from server.domain.commands import Pass
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.hand_types import HandType, parse_hand
-from server.domain.legal_actions import ActionCandidate, legal_actions_for_state
+from server.domain.legal_actions import ActionCandidate, legal_actions_for_snapshot, legal_actions_for_state
 from server.domain.reducer import reduce_command
 from server.domain.seats import SEATS, Seat
 from server.domain.state import DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
+from server.services.snapshots import SeatSnapshot, public_snapshot
 
 
 def player(seat: Seat) -> PlayerRef:
@@ -200,6 +201,26 @@ class LegalActionTests(unittest.TestCase):
         state = make_state(turn=Seat.EAST)
 
         self.assertEqual(legal_actions_for_state(state, Seat.SOUTH), ())
+
+    def test_snapshot_play_or_pass_uses_public_trick_and_private_hand(self) -> None:
+        current = parse_hand(cards("D1-S-A"))
+        state = make_state(
+            turn=Seat.NORTH,
+            current_trick=TrickState(lead_seat=Seat.EAST, last_play=current, last_play_seat=Seat.EAST),
+            hands={Seat.NORTH: ("D1-S-3", "D1-BJ")},
+        )
+        snapshot = SeatSnapshot(
+            public=public_snapshot(state, acting_seat=Seat.NORTH),
+            seat=Seat.NORTH,
+            hand=("D1-S-3", "D1-BJ"),
+            legal_action="play_or_pass",
+        )
+
+        actions = legal_actions_for_snapshot(snapshot)
+
+        self.assertEqual(actions[0].to_payload(), {"type": "pass"})
+        self.assertIn(("D1-BJ",), [action.card_ids for action in actions])
+        self.assertNotIn(("D1-S-3",), [action.card_ids for action in actions])
 
     def _assert_reducer_accepts_all(
         self,

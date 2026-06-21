@@ -11,6 +11,8 @@ from db.player.store import (
     profile_assignments,
     record_profile_result,
 )
+from db.player.factory import NPC_LINEUPS, player_for_profile
+from npc.rl_agent import RlAgentPlayer
 
 
 class PlayerDatabaseTests(unittest.TestCase):
@@ -19,6 +21,14 @@ class PlayerDatabaseTests(unittest.TestCase):
             database = load_player_database(Path(tmp) / "missing")
 
         self.assertEqual([profile.display_name for profile in database.profiles], ["Ming", "Jade", "River", "Atlas"])
+        self.assertEqual({profile.kind for profile in database.profiles}, {"rl"})
+
+    def test_rl_lineup_is_supported_by_player_factory(self) -> None:
+        self.assertIn("rl", NPC_LINEUPS)
+
+        player = player_for_profile(DEFAULT_PLAYER_PROFILES[0], "rl")
+
+        self.assertIsInstance(player, RlAgentPlayer)
 
     def test_loads_player_directory_and_preserves_split_files_on_save(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -33,7 +43,8 @@ class PlayerDatabaseTests(unittest.TestCase):
                 json.dumps(
                     {
                         "display_name": "also",
-                        "kind": "llm",
+                        "kind": "rl",
+                        "rl_model_path": "data/models/custom.pt",
                         "favorite_color": "green",
                     }
                 ),
@@ -73,6 +84,8 @@ class PlayerDatabaseTests(unittest.TestCase):
 
         profile = database.profiles[0]
         self.assertEqual(profile.preferred_seat, "E")
+        self.assertEqual(profile.kind, "rl")
+        self.assertEqual(profile.extra["rl_model_path"], "data/models/custom.pt")
         self.assertEqual(profile.llm_config.play_fast.provider_name, "codex-cli")
         self.assertEqual(profile.llm_config.play_fast.timeout_seconds, 55.0)
         self.assertEqual(profile.llm_config.play_fast.model_reasoning_effort, "low")
@@ -84,6 +97,8 @@ class PlayerDatabaseTests(unittest.TestCase):
         self.assertEqual(profile.llm_config.memory_max_output_tokens, 900)
         self.assertEqual(profile.statistics.score, 9)
         self.assertNotIn("seat", saved_profile)
+        self.assertEqual(saved_profile["kind"], "rl")
+        self.assertEqual(saved_profile["rl_model_path"], "data/models/custom.pt")
         self.assertEqual(saved_profile["favorite_color"], "green")
         self.assertEqual(saved_llm_config["play"]["fast"]["provider_name"], "codex-cli")
         self.assertNotIn("provider_name", saved_llm_config)
