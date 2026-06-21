@@ -17,7 +17,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    result = run_cli(sys.argv[1:] if argv is None else argv, input_fn=input, output_fn=sys.stdout.write)
+    result = run_cli(sys.argv[1:] if argv is None else argv, output_fn=sys.stdout.write)
     return result.exit_code
 
 
@@ -43,6 +43,8 @@ def run_cli(
         if args.command == "snapshot":
             emit(format_public_snapshot(active_client.table_snapshot(args.table_id)).rstrip())
             return Result(0, "".join(output))
+        if _should_run_textual(args, input_fn):
+            return _run_textual_play(args, active_client, emit)
         input_reader = input_fn or input
         session, public_snapshot = prepare_default_table(active_client, args)
         seat_label = "Watching" if session.player_mode == "llm" else "You are"
@@ -73,6 +75,12 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument("--player-id", help="Human player ID. Defaults to human-<seat>.")
     play.add_argument("--controller-id", help="Human controller ID. Defaults to human-controller-<seat>.")
     play.add_argument("--display-name", help="Human display name. Defaults to the OS login name.")
+    play.add_argument(
+        "--ui",
+        choices=("auto", "classic", "textual"),
+        default="auto",
+        help="Interactive UI. auto uses Textual on a real terminal and classic output otherwise.",
+    )
     play.add_argument(
         "--player-mode",
         dest="player_mode",
@@ -118,3 +126,26 @@ def _normalize_argv(argv: Sequence[str] | None) -> list[str]:
     if values and values[0] in {"play", "snapshot"}:
         return values
     return ["play", *values]
+
+
+def _should_run_textual(args: argparse.Namespace, input_fn: InputFn | None) -> bool:
+    ui = getattr(args, "ui", "classic")
+    if ui == "textual":
+        return True
+    return ui == "auto" and input_fn is None and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _run_textual_play(
+    args: argparse.Namespace,
+    client: GuandanHttpClient,
+    emit: OutputFn,
+) -> Result:
+    try:
+        from client.tui.textual_app import run_textual_play
+    except ModuleNotFoundError as exc:
+        if exc.name != "textual":
+            raise
+        message = "Error: Textual UI requires the 'textual' package. Run `uv sync --dev` or use `--ui classic`."
+        emit(message)
+        return Result(1, f"{message}\n")
+    return run_textual_play(args, client=client)

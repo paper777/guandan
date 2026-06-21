@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import time
 from enum import StrEnum
+from typing import Callable
 
 from client.http_client import GuandanClientError, GuandanHttpClient
 from client.types import ActionRequest, JsonObject, SeatMember, SeatRole
@@ -28,6 +29,7 @@ TERMINAL_PHASES = {"ABORTED"}
 TIMEOUT_POLL_ATTEMPTS = 20
 TIMEOUT_POLL_INTERVAL_SECONDS = 0.1
 _COMMAND_NOT_HANDLED = object()
+ResponseHook = Callable[[JsonObject], None]
 
 
 class MachineState(StrEnum):
@@ -397,6 +399,7 @@ def drive_bot_turns(
     max_actions: int,
     *,
     watch_private_seat: str | None = None,
+    response_hook: ResponseHook | None = None,
 ) -> JsonObject:
     current = public_snapshot
     actions = 0
@@ -450,6 +453,8 @@ def drive_bot_turns(
             return client.table_snapshot(session.table_id)
         for result in submitted:
             emit(format_command_response(result.response).rstrip())
+            if response_hook is not None:
+                response_hook(result.response)
             trigger_role_observers(session, seat, result.action, result.response)
         current = client.table_snapshot(session.table_id)
         actions += len(submitted)
