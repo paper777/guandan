@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add a per-table match timeout ticker with a default 45-second action deadline. The ticker is owned by the table actor, not the domain reducer, so rule logic stays deterministic and independent from wall-clock time.
+Add a per-table match timeout ticker with a default 180-second action deadline. The ticker is owned by the table actor, not the domain reducer, so rule logic stays deterministic and independent from wall-clock time.
 
 The ticker applies whenever a seat is expected to submit an action:
 
@@ -15,7 +15,7 @@ When the deadline expires, the actor applies a configured fallback command throu
 
 ## Goals
 
-- Enforce a default 45-second action deadline per table match.
+- Enforce a default 180-second action deadline per table match.
 - Expose enough ticker state for clients to render a countdown.
 - Keep timeout behavior auditable and replay-compatible.
 - Preserve reducer purity by keeping all clock reads, sleeps, and cancellation in `TableActor`.
@@ -35,7 +35,7 @@ Add table-level timeout config:
 
 ```python
 TableConfig:
-  action_timeout_seconds: int = 45
+  action_timeout_seconds: int = 180
   timeout_fallback: TimeoutFallback = "auto_pass"
 ```
 
@@ -43,18 +43,18 @@ Validation:
 
 - `action_timeout_seconds` must be positive.
 - Recommended first bound: `5 <= action_timeout_seconds <= 300`.
-- Existing tables without explicit config use `45`.
+- Existing tables without explicit config use `180`.
 
 HTTP table creation should accept optional config:
 
 ```json
 {
-  "action_timeout_seconds": 45,
+  "action_timeout_seconds": 180,
   "timeout_fallback": "auto_pass"
 }
 ```
 
-For compatibility, `POST /tables` with an empty body continues to create a table with the default 45-second timeout.
+For compatibility, `POST /tables` with an empty body continues to create a table with the default 180-second timeout.
 
 ### Snapshot Fields
 
@@ -94,7 +94,7 @@ Recommended payloads:
     "seat": "E",
     "kind": "lead",
     "deadline_epoch_ms": 1710000000000,
-    "timeout_seconds": 45
+    "timeout_seconds": 180
   }
 }
 ```
@@ -175,7 +175,7 @@ After every accepted state mutation:
 1. Determine whether the new state requires an action prompt.
 2. If no prompt is required, cancel any existing timeout task.
 3. If the required prompt is unchanged, keep the existing deadline.
-4. If the required prompt changed, cancel the old timeout task and start a new 45-second deadline.
+4. If the required prompt changed, cancel the old timeout task and start a new 180-second deadline.
 5. Broadcast the fresh snapshot containing the new `action_deadline_epoch_ms`.
 
 Prompt identity should include at least `(phase, acting_seat, event_seq, prompt_kind)` so duplicate broadcasts do not reset the timer.
@@ -213,7 +213,7 @@ Rejected fallback commands are a service bug or incomplete fallback policy. They
 
 Update table creation schemas:
 
-- `TableCreateRequest(action_timeout_seconds: int = 45, timeout_fallback: str = "auto_pass")`
+- `TableCreateRequest(action_timeout_seconds: int = 180, timeout_fallback: str = "auto_pass")`
 - `TableCreateResponse(table_id: str, action_timeout_seconds: int, timeout_fallback: str)`
 
 Existing clients that post `{}` or no body remain valid.
@@ -245,7 +245,7 @@ Phase-one restart behavior:
 
 - Rebuild match state from persisted events.
 - Recompute the active prompt.
-- Start a fresh 45-second deadline from actor startup time.
+- Start a fresh 180-second deadline from actor startup time.
 
 Future stricter behavior may persist `ActionPrompted.deadline_epoch_ms` and resume the remaining time after restart.
 
@@ -253,7 +253,7 @@ Future stricter behavior may persist `ActionPrompted.deadline_epoch_ms` and resu
 
 ### Unit Tests
 
-- `TableConfig` defaults to 45 seconds.
+- `TableConfig` defaults to 180 seconds.
 - Invalid timeout config is rejected.
 - Prompt detection returns the expected acting seat and kind for `lead`, `play_or_pass`, `tribute`, and `return_tribute`.
 - `auto_pass` builds `Pass` for `play_or_pass`.
@@ -271,7 +271,7 @@ Future stricter behavior may persist `ActionPrompted.deadline_epoch_ms` and resu
 
 ### API Tests
 
-- `POST /tables` with no body returns default 45-second timeout config.
+- `POST /tables` with no body returns default 180-second timeout config.
 - `POST /tables` accepts a custom timeout within bounds.
 - Public and private snapshots include the deadline fields.
 - WebSocket snapshot after reconnect includes current deadline fields.
@@ -296,5 +296,5 @@ Future stricter behavior may persist `ActionPrompted.deadline_epoch_ms` and resu
 
 - Should timeout config be immutable after table creation for v1?
 - Should `ActionPrompted` be persisted immediately, or only broadcast until timeout automation is implemented?
-- Should disconnected human seats use `auto_pass` after 45 seconds, or should a separate reconnect grace policy override table timeout?
+- Should disconnected human seats use `auto_pass` after 180 seconds, or should a separate reconnect grace policy override table timeout?
 - Do we want prompt IDs in client command payloads now, or defer until stale-action UX needs them?

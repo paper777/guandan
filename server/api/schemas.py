@@ -8,16 +8,17 @@ from server.domain.events import CommandRejected, Event
 from server.domain.seats import Seat, Team
 from server.domain.state import MatchPhase
 from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
+from server.services.table_config import DEFAULT_ACTION_TIMEOUT_SECONDS
 
 
 class TableCreateResponse(BaseModel):
     table_id: str
-    action_timeout_seconds: int = 45
+    action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS
     timeout_fallback: Literal["auto_pass"] = "auto_pass"
 
 
 class TableCreateRequest(BaseModel):
-    action_timeout_seconds: int = Field(default=45, ge=5, le=300)
+    action_timeout_seconds: int = Field(default=DEFAULT_ACTION_TIMEOUT_SECONDS, ge=5, le=300)
     timeout_fallback: Literal["auto_pass"] = "auto_pass"
 
 
@@ -48,7 +49,7 @@ class PublicTableSnapshotSchema(BaseModel):
     current_level: str = "2"
     level_by_team: dict[Team, str] = Field(default_factory=dict)
     action_deadline_epoch_ms: int | None = None
-    action_timeout_seconds: int = 45
+    action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS
     acting_seat: Seat | None = None
     current_trick: dict[str, Any] | None = None
 

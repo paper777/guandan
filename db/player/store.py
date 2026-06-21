@@ -181,8 +181,14 @@ def profile_assignments(
     *,
     shuffle_seed: object = None,
     exclude_profile_keys: set[str] | frozenset[str] | None = None,
+    exclude_display_names: set[str] | frozenset[str] | None = None,
 ) -> list[tuple[PlayerProfile, str]]:
-    selected = _profiles_for_selected_seats(profiles, seats, exclude_profile_keys=exclude_profile_keys)
+    selected = _profiles_for_selected_seats(
+        profiles,
+        seats,
+        exclude_profile_keys=exclude_profile_keys,
+        exclude_display_names=exclude_display_names,
+    )
     available_seats = list(seats)
     rng = SystemRandom() if shuffle_seed is None else Random(shuffle_seed)
     rng.shuffle(available_seats)
@@ -392,11 +398,14 @@ def _profiles_for_selected_seats(
     seats: tuple[str, ...],
     *,
     exclude_profile_keys: set[str] | frozenset[str] | None = None,
+    exclude_display_names: set[str] | frozenset[str] | None = None,
 ) -> list[PlayerProfile]:
     excluded = set(exclude_profile_keys or ())
+    excluded_names = {_display_name_key(name) for name in (exclude_display_names or ()) if _display_name_key(name)}
     available_profiles = _with_fallback_profiles(
-        [profile for profile in profiles if profile.profile_key not in excluded],
+        _profiles_without_exclusions(profiles, excluded, excluded_names),
         excluded,
+        excluded_names,
         required_count=len(seats),
     )
     selected = set(seats)
@@ -408,22 +417,50 @@ def _profiles_for_selected_seats(
     return [*seat_matched, *remaining][: len(seats)]
 
 
+def _profiles_without_exclusions(
+    profiles: list[PlayerProfile],
+    excluded: set[str],
+    excluded_names: set[str],
+) -> list[PlayerProfile]:
+    available: list[PlayerProfile] = []
+    seen_names = set(excluded_names)
+    for profile in profiles:
+        name_key = _display_name_key(profile.display_name)
+        if profile.profile_key in excluded or name_key in seen_names:
+            continue
+        available.append(profile)
+        seen_names.add(name_key)
+    return available
+
+
 def _with_fallback_profiles(
     profiles: list[PlayerProfile],
     excluded: set[str],
+    excluded_names: set[str],
     *,
     required_count: int,
 ) -> list[PlayerProfile]:
     if len(profiles) >= required_count:
         return profiles
     seen = {profile.profile_key for profile in profiles}
+    seen_names = set(excluded_names)
+    seen_names.update(_display_name_key(profile.display_name) for profile in profiles)
     filled = list(profiles)
     for fallback in DEFAULT_PLAYER_PROFILES:
-        if fallback.profile_key in seen or fallback.profile_key in excluded:
+        if (
+            fallback.profile_key in seen
+            or fallback.profile_key in excluded
+            or _display_name_key(fallback.display_name) in seen_names
+        ):
             continue
         filled.append(fallback)
         seen.add(fallback.profile_key)
+        seen_names.add(_display_name_key(fallback.display_name))
     return filled
+
+
+def _display_name_key(value: object) -> str:
+    return str(value).strip().casefold()
 
 
 def _level_for_team(snapshot: dict[str, object] | None, team: str) -> str | None:

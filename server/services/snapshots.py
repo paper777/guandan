@@ -8,6 +8,7 @@ from server.domain.controllers import ControllerCapability
 from server.domain.hand_types import PlayedHand
 from server.domain.seats import Seat, Team
 from server.domain.state import MatchPhase, MatchState, TributeObligation
+from server.services.table_config import DEFAULT_ACTION_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +34,7 @@ class PublicTableSnapshot:
         default_factory=lambda: {Team.EAST_WEST: Rank.TWO, Team.SOUTH_NORTH: Rank.TWO}
     )
     action_deadline_epoch_ms: int | None = None
-    action_timeout_seconds: int = 45
+    action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS
     acting_seat: Seat | None = None
     current_trick: dict[str, object] | None = None
 
@@ -55,7 +56,7 @@ def public_snapshot(
     *,
     deal_id: int = 0,
     action_deadline_epoch_ms: int | None = None,
-    action_timeout_seconds: int = 45,
+    action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS,
     acting_seat: Seat | None = None,
 ) -> PublicTableSnapshot:
     hand_counts: dict[Seat, int] = {}
@@ -102,7 +103,7 @@ def seat_snapshot(
     *,
     deal_id: int = 0,
     action_deadline_epoch_ms: int | None = None,
-    action_timeout_seconds: int = 45,
+    action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS,
     acting_seat: Seat | None = None,
 ) -> SeatSnapshot:
     controller = state.controllers.get(seat)

@@ -58,7 +58,7 @@ class TableActorTests(unittest.TestCase):
         self.assertEqual([event.seq for event in result.events], [9, 10, 11, 12])
         self.assertEqual([event.seq for event in loaded[-4:]], [9, 10, 11, 12])
         self.assertEqual(len(loaded[-2].payload["hands"][Seat.EAST.value]), 27)
-        self.assertEqual(loaded[-1].payload["timeout_seconds"], 45)
+        self.assertEqual(loaded[-1].payload["timeout_seconds"], 180)
 
     def test_initializes_state_from_existing_event_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,10 +88,10 @@ class TableActorTests(unittest.TestCase):
         self.assertEqual(actor.state.event_seq, 4)
         self.assertEqual(set(actor.state.seats), set(SEATS))
 
-    def test_table_config_defaults_to_45_second_timeout(self) -> None:
+    def test_table_config_defaults_to_180_second_timeout(self) -> None:
         actor = TableActor("table-1")
 
-        self.assertEqual(actor.config.action_timeout_seconds, 45)
+        self.assertEqual(actor.config.action_timeout_seconds, 180)
 
     def test_table_config_uses_server_random_device_for_unpinned_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,7 +120,7 @@ class TableActorTests(unittest.TestCase):
         self.assertEqual(actor.active_prompt.kind, "lead")
         self.assertEqual(snapshot.acting_seat, Seat.EAST)
         self.assertEqual(snapshot.deal_id, 1)
-        self.assertEqual(snapshot.action_timeout_seconds, 45)
+        self.assertEqual(snapshot.action_timeout_seconds, 180)
         self.assertEqual(snapshot.action_deadline_epoch_ms, actor.active_prompt.deadline_epoch_ms)
 
     def test_human_command_resets_prompt_deadline(self) -> None:

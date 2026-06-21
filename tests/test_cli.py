@@ -537,6 +537,16 @@ class CommandLineClientTests(unittest.TestCase):
         self.assertIn("Error: HTTP 400: INVALID_HAND_TYPE: invalid hand", result.output)
         self.assertIn("Rejected cards: [♣️ 3, ♠️ 3]", result.output)
 
+    def test_local_card_resolution_error_does_not_crash(self) -> None:
+        client = FakeClient()
+        commands = iter(["play S-10", "quit"])
+
+        result = run_cli(["--npc-lineup", "dummy"], input_fn=lambda prompt: next(commands), client=client)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Error: card not in hand: S-10", result.output)
+        self.assertFalse(any(call[0] == "play_cards" for call in client.calls))
+
     def test_llm_rejection_shows_submitted_action_cards(self) -> None:
         class RejectLlmPlayClient(FakeClient):
             def play_cards(self, table_id, seat, controller_id, card_ids, *, declared_type=None):
@@ -801,6 +811,30 @@ class CommandLineClientTests(unittest.TestCase):
         self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
         self.assertEqual({call[3] for call in join_agent_calls}, {"Jade", "River", "Atlas"})
 
+    def test_cli_excludes_npc_profile_matching_human_display_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_player_storage(
+                Path(tmp),
+                [
+                    {"display_name": "also", "kind": "dummy"},
+                    {"display_name": "Jade", "kind": "dummy"},
+                    {"display_name": "River", "kind": "dummy"},
+                    {"display_name": "Atlas", "kind": "dummy"},
+                ],
+            )
+            client = FakeClient()
+
+            result = run_cli(
+                ["--display-name", "also", "--npc-player-config", str(path), "--npc-lineup", "mixed"],
+                input_fn=lambda prompt: "quit",
+                client=client,
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        join_agent_calls = [call for call in client.calls if call[0] == "join_agent"]
+        self.assertEqual({call[2] for call in join_agent_calls}, {"S", "W", "N"})
+        self.assertEqual({call[3] for call in join_agent_calls}, {"Jade", "River", "Atlas"})
+
     def test_cli_llm_lineup_uses_named_llm_players(self) -> None:
         client = FakeClient()
 
@@ -855,6 +889,12 @@ class CommandLineClientTests(unittest.TestCase):
         self.assertEqual(
             resolve_card_inputs(["S3", "♥2", "SJ"], {"hand": ["D1-SJ", "D1-H-2", "D2-S-3"]}),
             ("D2-S-3", "D1-H-2", "D1-SJ"),
+        )
+
+    def test_delimited_diamond_card_input_resolves_against_hand(self) -> None:
+        self.assertEqual(
+            resolve_card_inputs(["D-9", "D1-SJ"], {"hand": ["D1-D-9", "D1-SJ"]}),
+            ("D1-D-9", "D1-SJ"),
         )
 
     def test_delimited_spade_jack_does_not_resolve_as_small_joker(self) -> None:

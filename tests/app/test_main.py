@@ -87,14 +87,14 @@ class AppTests(unittest.TestCase):
         status, body = asyncio.run(call_app("POST", "/tables"))
         self.assertEqual(status, 201)
         table_id = body["table_id"]
-        self.assertEqual(body["action_timeout_seconds"], 45)
+        self.assertEqual(body["action_timeout_seconds"], 180)
         self.assertEqual(body["timeout_fallback"], "auto_pass")
 
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}"))
 
         self.assertEqual(status, 200)
         self.assertEqual(body["table_id"], table_id)
-        self.assertEqual(body["action_timeout_seconds"], 45)
+        self.assertEqual(body["action_timeout_seconds"], 180)
 
     def test_create_table_accepts_custom_timeout(self) -> None:
         status, body = asyncio.run(call_app("POST", "/tables", {"action_timeout_seconds": 60}))

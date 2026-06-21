@@ -12,6 +12,7 @@ from db.player.store import (
     record_profile_result,
 )
 from db.player.factory import NPC_LINEUPS, player_for_profile
+from db.player.types import PlayerProfile
 from npc.rl_agent import RlAgentPlayer
 
 
@@ -138,6 +139,21 @@ class PlayerDatabaseTests(unittest.TestCase):
 
         self.assertEqual([profile.profile_key for profile, _ in assignments], ["Ming", "River"])
         self.assertEqual({seat for _, seat in assignments}, {"E", "S"})
+
+    def test_profile_assignment_excludes_reserved_display_names(self) -> None:
+        assignments = profile_assignments(
+            [
+                PlayerProfile("also", "dummy", profile_key="local-human", preferred_seat="E"),
+                PlayerProfile("Jade", "dummy", profile_key="Jade", preferred_seat="S"),
+                PlayerProfile("River", "dummy", profile_key="River", preferred_seat="W"),
+            ],
+            ("E", "S", "W"),
+            shuffle_seed=1,
+            exclude_display_names={"Also"},
+        )
+
+        self.assertNotIn("also", {profile.display_name for profile, _ in assignments})
+        self.assertEqual(len(assignments), 3)
 
     def test_record_profile_result_updates_deal_and_match_statistics(self) -> None:
         profile = DEFAULT_PLAYER_PROFILES[0]

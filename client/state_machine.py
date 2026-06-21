@@ -367,7 +367,7 @@ class StateMachine:
                 "client.state_machine.human_command_failed",
                 table_id=self.session.table_id,
                 seat=self.session.human_seat,
-                command=command_action(command, seat_snapshot),
+                command=safe_command_action(command, seat_snapshot),
                 status=exc.status,
                 error_payload=exc.payload,
             )
@@ -491,6 +491,19 @@ def command_action(command: str, seat_snapshot: JsonObject) -> JsonObject:
         card_ids = command_card_ids(command, seat_snapshot)
         return {"type": "return_tribute", "card_id": card_ids[0] if card_ids else ""}
     return {"type": action}
+
+
+def safe_command_action(command: str, seat_snapshot: JsonObject) -> JsonObject:
+    try:
+        return command_action(command, seat_snapshot)
+    except GuandanClientError as exc:
+        parts = command.split()
+        action = parts[0] if parts else ""
+        return {
+            "type": action or "unknown",
+            "raw_command": command,
+            "parse_error": str(exc),
+        }
 
 
 def _action_request_from_seat_snapshot(session: Session, seat_snapshot: JsonObject) -> ActionRequest:

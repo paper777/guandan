@@ -117,10 +117,10 @@ def resolve_card_label(token: str, hand: tuple[str, ...], used: set[str]) -> str
 def normalized_card_label(value: str) -> tuple[str | None, str] | None:
     raw = value.strip().upper().replace("\ufe0f", "").replace("🃏", "")
     parts = raw.replace("_", "-").replace(":", "-").split("-")
-    if len(parts) == 2 and parts[0].startswith("D"):
+    if len(parts) == 2 and is_deck_prefix(parts[0]):
         rank = normalize_rank(parts[1])
         return (None, rank) if rank in {"SJ", "BJ"} else None
-    if len(parts) == 3 and parts[0].startswith("D"):
+    if len(parts) == 3 and is_deck_prefix(parts[0]):
         suit = SUIT_INPUT_ALIASES.get(parts[1])
         rank = normalize_rank(parts[2])
         return (suit, rank) if suit is not None and rank in RANK_SORT_ORDER else None
@@ -150,3 +150,7 @@ def normalize_rank(value: str) -> str:
     if rank == "T":
         return "10"
     return rank
+
+
+def is_deck_prefix(value: str) -> bool:
+    return len(value) > 1 and value.startswith("D") and value[1:].isdecimal()

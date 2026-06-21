@@ -13,7 +13,7 @@ from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTrib
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
 from server.services.public_events import public_events
-from server.services.table_config import TableConfig, TimeoutFallback
+from server.services.table_config import DEFAULT_ACTION_TIMEOUT_SECONDS, TableConfig, TimeoutFallback
 from server.services.table_actor import TableActor
 
 
@@ -233,7 +233,7 @@ def _receive_once(body: bytes) -> Any:
 
 def _table_config_from_body(body: dict[str, Any]) -> TableConfig:
     return TableConfig(
-        action_timeout_seconds=int(body.get("action_timeout_seconds", 45)),
+        action_timeout_seconds=int(body.get("action_timeout_seconds", DEFAULT_ACTION_TIMEOUT_SECONDS)),
         timeout_fallback=TimeoutFallback(str(body.get("timeout_fallback", TimeoutFallback.AUTO_PASS.value))),
     )
 

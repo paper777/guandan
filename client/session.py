@@ -76,6 +76,7 @@ def prepare_default_table(client: GuandanHttpClient, args: argparse.Namespace) -
         lineup=args.npc_lineup,
         storage_dir=storage_dir,
         watched_profile_key=watched_profile_key,
+        reserved_display_names=_reserved_display_names(occupied_seats, human_display_name),
     )
     human_controller_id = _ready_players(client, bot_broker, table_id, human_seat, human_controller_id, player_mode)
     _add_broker_player_roles(role_table, bot_broker)
@@ -150,6 +151,7 @@ def _add_remaining_npc_players(
     lineup: str,
     storage_dir: Path,
     watched_profile_key: str | None,
+    reserved_display_names: set[str],
 ) -> None:
     npc_seats = [seat.value for seat in SEATS if seat.value != human_seat and seat.value not in occupied_seats]
     bot_broker.add_players(
@@ -157,6 +159,7 @@ def _add_remaining_npc_players(
         lineup=lineup,
         storage_dir=storage_dir,
         exclude_profile_keys={watched_profile_key} if watched_profile_key else None,
+        exclude_display_names=reserved_display_names,
     )
 
 
@@ -321,6 +324,17 @@ def _npc_storage_dir(config_path: str | None) -> Path:
 def _snapshot_seats(snapshot: JsonObject) -> dict[object, object]:
     seats = snapshot.get("seats")
     return seats if isinstance(seats, dict) else {}
+
+
+def _reserved_display_names(seats: dict[object, object], human_display_name: str) -> set[str]:
+    names = {human_display_name}
+    for player in seats.values():
+        if not isinstance(player, dict):
+            continue
+        display_name = str(player.get("display_name") or "").strip()
+        if display_name:
+            names.add(display_name)
+    return names
 
 
 def _choose_available_seat(seats: object) -> str:

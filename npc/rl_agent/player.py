@@ -10,6 +10,7 @@ from server.domain.cards import Rank
 from server.domain.legal_actions import ActionCandidate, legal_actions_for_snapshot
 from server.domain.seats import SEATS, Seat, Team
 from server.domain.state import MatchPhase
+from server.services.table_config import DEFAULT_ACTION_TIMEOUT_SECONDS
 from server.services.snapshots import PublicPlayer, PublicTableSnapshot, SeatSnapshot
 from training.heuristic import HeuristicPolicy
 
@@ -103,7 +104,7 @@ def _public_snapshot(
         current_level=current_level,
         level_by_team=_level_by_team(public_payload.get("level_by_team"), current_level),
         action_deadline_epoch_ms=_optional_int(public_payload.get("action_deadline_epoch_ms")),
-        action_timeout_seconds=int(public_payload.get("action_timeout_seconds") or 45),
+        action_timeout_seconds=int(public_payload.get("action_timeout_seconds") or DEFAULT_ACTION_TIMEOUT_SECONDS),
         acting_seat=_optional_seat(public_payload.get("acting_seat")),
         current_trick=_dict(prompt.get("current_trick") or public_payload.get("current_trick")) or None,
     )

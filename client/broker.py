@@ -88,6 +88,7 @@ class NpcBroker:
         config_path: str | Path | None = None,
         shuffle_seed: object = None,
         exclude_profile_keys: set[str] | frozenset[str] | None = None,
+        exclude_display_names: set[str] | frozenset[str] | None = None,
     ) -> list[BrokerSeat]:
         selected = tuple(seats or SEATS)
         if config_path is not None:
@@ -97,6 +98,7 @@ class NpcBroker:
             selected,
             shuffle_seed=shuffle_seed,
             exclude_profile_keys=exclude_profile_keys,
+            exclude_display_names=exclude_display_names,
         )
         broker_seats: list[BrokerSeat] = []
         for profile, seat in assignments:

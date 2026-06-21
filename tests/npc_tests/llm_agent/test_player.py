@@ -184,7 +184,7 @@ class LlmAgentPolicyTests(unittest.TestCase):
                             "current_trick": None,
                             "seats": {"S": {"display_name": "South"}},
                             "action_deadline_epoch_ms": 123,
-                            "action_timeout_seconds": 45,
+                            "action_timeout_seconds": 180,
                         },
                     },
                 )

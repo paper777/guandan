@@ -8,7 +8,7 @@ The source page publishes 《掼蛋（国家）竞赛规则（2017版）》 / �
 
 Related review plans:
 
-- [Match Timeout Ticker Design Plan](match_timeout_ticker_plan.md): proposed per-table 45-second action deadline and timeout fallback behavior.
+- [Match Timeout Ticker Design Plan](match_timeout_ticker_plan.md): proposed per-table 180-second action deadline and timeout fallback behavior.
 
 ## Goals
 
@@ -830,7 +830,7 @@ Implemented or partially implemented:
 - Event-log replay rebuild for the currently implemented event set, wired into event-backed `TableActor` initialization.
 - Async serialized `TableActor.dispatch_async` entrypoint for API/WebSocket callers.
 - Cryptographically random unseeded shuffle source, while preserving deterministic seeded deals for tests.
-- Per-table action timeout configuration, default 45-second actor-owned action prompts, public deadline snapshots, timeout audit events, and basic `auto_pass` fallback for play/tribute prompts.
+- Per-table action timeout configuration, default 180-second actor-owned action prompts, public deadline snapshots, timeout audit events, and basic `auto_pass` fallback for play/tribute prompts.
 - Unit tests for core cards, hand types, comparator behavior, reducer flow, snapshots, table actor idempotency/restart, SQLite event storage, replay rebuild, simple policy, external agent payloads, CLI, and app basics.
 
 Still missing or incomplete:
