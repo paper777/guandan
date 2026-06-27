@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Guandan Showdown</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <main class="workspace">
+        <section class="table-stage" aria-label="Guandan table">
+          <div class="game-table" id="gameTable">
+            <div class="seat-zone seat-top" id="seatTop"></div>
+            <div class="seat-zone seat-right" id="seatRight"></div>
+            <div class="seat-zone seat-bottom" id="seatBottom"></div>
+            <div class="seat-zone seat-left" id="seatLeft"></div>
+            <div class="trick-zone" id="trickZone"></div>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-section score-panel">
+            <div class="section-title">Score</div>
+            <div class="score-strip" id="scoreStrip"></div>
+          </section>
+          <section class="panel-section" id="seatTabs"></section>
+          <section class="panel-section" id="seatControls"></section>
+          <section class="panel-section event-panel">
+            <div class="section-title">Events</div>
+            <div id="eventLog" class="event-log"></div>
+          </section>
+        </aside>
+      </main>
+      <footer class="bottom-strip control-panel">
+        <div class="brand">
+          <span class="brand-mark">G</span>
+          <span class="brand-title">Guandan Showdown</span>
+        </div>
+        <div class="table-tools">
+          <select id="tableSelect" class="table-select" aria-label="Table"></select>
+          <button id="refreshTables" class="tool-button" type="button">Refresh</button>
+          <button id="createTable" class="primary-button" type="button">New Table</button>
+          <button id="quickStart" class="primary-button accent" type="button">Quick Match</button>
+        </div>
+        <div id="statusLine" class="status-line">Idle</div>
+      </footer>
+    </div>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>

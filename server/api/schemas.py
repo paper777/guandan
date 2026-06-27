@@ -106,6 +106,10 @@ class ReadyRequest(ControllerCommandRequest):
     pass
 
 
+class BotActionRequest(ControllerCommandRequest):
+    pass
+
+
 class StartMatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -157,6 +161,7 @@ class CommandResponse(BaseModel):
     replayed: bool = False
     player_id: str | None = None
     controller_id: str | None = None
+    selected_action: dict[str, Any] | None = None
 
 
 class RejectionResponse(BaseModel):
