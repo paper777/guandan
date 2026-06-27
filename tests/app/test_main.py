@@ -173,6 +173,45 @@ class AppTests(unittest.TestCase):
         status, body = asyncio.run(call_app("GET", f"/tables/{table_id}/seats/E/snapshot?controller_id=c-S"))
         self.assertEqual(status, 400)
 
+    def test_bot_action_uses_rl_agent_policy_and_dispatches_command(self) -> None:
+        status, body = asyncio.run(call_app("POST", "/tables"))
+        self.assertEqual(status, 201)
+        table_id = body["table_id"]
+
+        for seat in ("E", "N", "W"):
+            status, body = asyncio.run(
+                call_app(
+                    "POST",
+                    f"/tables/{table_id}/join-local-bot",
+                    {"seat": seat, "player_id": f"p-{seat}", "controller_id": f"c-{seat}"},
+                )
+            )
+            self.assertEqual(status, 200)
+        status, _ = asyncio.run(
+            call_app(
+                "POST",
+                f"/tables/{table_id}/join-human",
+                {"seat": "S", "player_id": "p-S", "controller_id": "c-S"},
+            )
+        )
+        self.assertEqual(status, 200)
+        for seat in ("E", "S", "W", "N"):
+            status, _ = asyncio.run(
+                call_app("POST", f"/tables/{table_id}/ready", {"seat": seat, "controller_id": f"c-{seat}"})
+            )
+            self.assertEqual(status, 200)
+        status, _ = asyncio.run(call_app("POST", f"/tables/{table_id}/start"))
+        self.assertEqual(status, 200)
+
+        status, body = asyncio.run(
+            call_app("POST", f"/tables/{table_id}/bot-action", {"seat": "E", "controller_id": "c-E"})
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["selected_action"]["type"], "play_cards")
+        self.assertIn("CardsPlayed", [event["type"] for event in body["events"]])
+        self.assertEqual(body["snapshot"]["current_turn"], "N")
+
     def test_audit_log_records_request_response_with_private_fields_redacted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             audit_path = Path(tmp) / "audit.jsonl"

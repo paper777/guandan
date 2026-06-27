@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from common.log import audit_log_enabled, make_audit_entry, parse_json_body, write_audit_entry
+from server.app.web_ui import content_type_for_file, web_ui_file_for_path
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.seats import Seat
@@ -67,6 +68,17 @@ async def _audit_http(scope: dict[str, Any], receive: Any, send: Any) -> None:
 async def _http(scope: dict[str, Any], receive: Any, send: Any) -> None:
     method = scope.get("method", "GET")
     path = scope.get("path", "")
+    if method == "GET" and path in {"", "/", "/ui"}:
+        await _redirect(send, "/ui/")
+        return
+    if method == "GET":
+        web_ui_file = web_ui_file_for_path(path)
+        if web_ui_file is not None:
+            if web_ui_file.exists() and web_ui_file.is_file():
+                await _file(send, web_ui_file.read_bytes(), content_type_for_file(web_ui_file))
+                return
+            await _json(send, 404, {"error": "web UI asset not found"})
+            return
     if path == "/health":
         await _json(send, 200, {"ok": True, "service": "guandan-server"})
         return
@@ -183,6 +195,28 @@ async def _json(send: Any, status: int, payload: Any) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+async def _file(send: Any, body: bytes, content_type: str) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", content_type.encode())],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _redirect(send: Any, location: str) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 307,
+            "headers": [(b"location", location.encode())],
+        }
+    )
+    await send({"type": "http.response.body", "body": b""})
 
 
 def _to_jsonable(value: Any) -> Any:

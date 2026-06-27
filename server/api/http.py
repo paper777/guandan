@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Any
 
+from client.types import ActionRequest
 from fastapi import Request
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
@@ -22,6 +23,7 @@ from common.log import (
 )
 from server.api.schemas import (
     AgentJoinRequest,
+    BotActionRequest,
     CommandResponse,
     ErrorResponse,
     EventSchema,
@@ -42,6 +44,7 @@ from server.api.schemas import (
     TableListResponse,
     VersionResponse,
 )
+from server.api.web_ui import register_web_ui
 from server.api.websocket import register_websocket_routes
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
@@ -49,6 +52,10 @@ from server.domain.seats import Seat
 from server.services.table_config import TableConfig, TimeoutFallback
 from server.services.table_actor import ActorResult, TableActor
 from server.services.public_events import public_events
+from server.services.snapshots import SeatSnapshot
+
+
+_RL_AGENT_PLAYER: Any | None = None
 
 
 def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
@@ -58,6 +65,7 @@ def create_app(tables: dict[str, TableActor] | None = None) -> FastAPI:
     router = create_router(table_registry)
     app.include_router(router)
     register_websocket_routes(app, table_registry)
+    register_web_ui(app)
     return app
 
 
@@ -237,6 +245,36 @@ def create_router(tables: dict[str, TableActor]) -> APIRouter:
         return await _command_response(actor, Ready(request.controller_id, request.seat), request)
 
     @router.post(
+        "/tables/{table_id}/bot-action",
+        response_model=CommandResponse,
+        responses={400: {"model": RejectionResponse}, 404: {"model": ErrorResponse}},
+    )
+    async def bot_action(table_id: str, request: BotActionRequest) -> CommandResponse | JSONResponse:
+        actor = _actor_or_404(tables, table_id)
+        controller = actor.state.controllers.get(request.seat)
+        if controller is None or controller.id != request.controller_id:
+            raise HTTPException(status_code=400, detail="controller is not attached to that seat")
+        if controller.kind not in {ControllerKind.LOCAL_BOT, ControllerKind.EXTERNAL_AGENT}:
+            raise HTTPException(status_code=400, detail="bot action requires a bot or agent controller")
+        try:
+            snapshot = actor.seat_snapshot(request.seat, request.controller_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if snapshot.legal_action is None:
+            raise HTTPException(status_code=400, detail="seat is not waiting for an action")
+        selected_action = _rl_agent_player().choose_action(_agent_request_from_snapshot(snapshot, request.request_id))
+        try:
+            command = _command_from_agent_action(selected_action, request)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"RL agent selected an invalid action: {exc}") from exc
+        return await _command_response(
+            actor,
+            command,
+            request,
+            extra={"selected_action": selected_action},
+        )
+
+    @router.post(
         "/tables/{table_id}/start",
         response_model=CommandResponse,
         responses={400: {"model": RejectionResponse}, 404: {"model": ErrorResponse}},
@@ -307,6 +345,66 @@ def _actor_or_404(tables: dict[str, TableActor], table_id: str) -> TableActor:
     if actor is None:
         raise HTTPException(status_code=404, detail="table not found")
     return actor
+
+
+def _rl_agent_player() -> Any:
+    global _RL_AGENT_PLAYER
+    if _RL_AGENT_PLAYER is None:
+        from npc.rl_agent import RlAgentPlayer
+
+        _RL_AGENT_PLAYER = RlAgentPlayer()
+    return _RL_AGENT_PLAYER
+
+
+def _agent_request_from_snapshot(snapshot: SeatSnapshot, request_id: str | None) -> ActionRequest:
+    public = PublicTableSnapshotSchema.from_snapshot(snapshot.public).model_dump(mode="json")
+    prompt = {
+        "kind": snapshot.legal_action,
+        "current_level": public.get("current_level", "2"),
+        "current_trick": public.get("current_trick"),
+        "eligible_card_ids": list(snapshot.eligible_card_ids),
+        "tribute_from": snapshot.tribute_from.value if snapshot.tribute_from else None,
+        "tribute_to": snapshot.tribute_to.value if snapshot.tribute_to else None,
+        "return_rank_at_most_ten": snapshot.return_rank_at_most_ten,
+    }
+    players_by_seat = {
+        seat: player.get("display_name", seat)
+        for seat, player in dict(public.get("seats", {})).items()
+        if isinstance(player, dict)
+    }
+    return ActionRequest(
+        request_id or f"web-bot-{snapshot.seat.value}-{snapshot.public.event_seq}",
+        prompt,
+        {
+            "table_id": snapshot.public.table_id,
+            "seat": snapshot.seat.value,
+            "hand": list(snapshot.hand),
+            "players_by_seat": players_by_seat,
+            "public": public,
+        },
+    )
+
+
+def _command_from_agent_action(action: dict[str, Any], request: BotActionRequest) -> Any:
+    action_type = action.get("type")
+    if action_type == "pass":
+        return Pass(request.controller_id, request.seat)
+    if action_type == "play_cards":
+        card_ids = tuple(str(card_id) for card_id in action.get("card_ids", []))
+        if not card_ids:
+            raise ValueError("play_cards requires card_ids")
+        declared_type = action.get("declared_type")
+        return PlayCards(
+            request.controller_id,
+            request.seat,
+            card_ids,
+            declared_type=str(declared_type) if declared_type is not None else None,
+        )
+    if action_type == "submit_tribute":
+        return SubmitTribute(request.controller_id, request.seat, str(action["card_id"]))
+    if action_type == "return_tribute":
+        return ReturnTribute(request.controller_id, request.seat, str(action["card_id"]))
+    raise ValueError(f"unsupported action type: {action_type}")
 
 
 async def _join(
