@@ -173,7 +173,8 @@ The server stores card IDs in player hands. Rule evaluation resolves IDs to card
 
 ### Seats and Teams
 
-Seats are fixed as `E, S, W, N`. Counter-clockwise order is configured once, and opposite seats are partners:
+Seats are fixed as `E`, `S`, `W`, and `N`. Counter-clockwise play order is `E, N, W, S`,
+and opposite seats are partners:
 
 - Team A: `E` and `W`.
 - Team B: `S` and `N`.

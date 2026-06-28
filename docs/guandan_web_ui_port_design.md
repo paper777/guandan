@@ -88,9 +88,9 @@ the browser becomes an observer until it joins another seat or creates a new tab
 The table rotates around the selected local human seat:
 
 - selected seat at bottom,
-- next seat in Guandan turn order on the left,
+- next seat in counter-clockwise Guandan turn order on the right,
 - partner/opposite seat at top,
-- previous seat on the right.
+- previous seat on the left.
 
 The table shows stable seat zones with count badges. Non-selected seats use card backs and counts.
 The selected human seat uses the real hand and card selection.

@@ -97,6 +97,7 @@ class WebUiTests(unittest.TestCase):
         status, _, body = asyncio.run(call_raw("/ui/app.js"))
 
         self.assertEqual(status, 200)
+        self.assertIn(b'const TURN_ORDER = ["E", "N", "W", "S"];', body)
         self.assertIn(b'return ["bottom", "right", "top", "left"][relative];', body)
 
     def test_unknown_ui_asset_returns_404(self) -> None:

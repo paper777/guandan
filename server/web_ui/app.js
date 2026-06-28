@@ -1,4 +1,5 @@
 const SEATS = ["E", "S", "W", "N"];
+// Guandan play proceeds counter-clockwise around the table.
 const TURN_ORDER = ["E", "N", "W", "S"];
 const SEAT_NAME = { E: "East", S: "South", W: "West", N: "North" };
 const TEAM_NAME = { EW: "East-West", SN: "South-North" };
