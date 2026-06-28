@@ -8,7 +8,7 @@ from server.domain.commands import Command, JoinTable, Ready, StartMatch
 from server.domain.comparator import RankContext
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.events import CommandRejected, Event
-from server.domain.hand_types import SEQUENCE_RANKS
+from server.domain.hand_types import SEQUENCE_RANKS, HandType
 from server.domain.legal_actions import ActionCandidate, CommandAction, legal_actions_for_state
 from server.domain.reducer import reduce_command
 from server.domain.seats import SEATS, Seat, Team, team_for_seat
@@ -51,11 +51,12 @@ class InitialHandProfile:
 class GuandanTrainingEnv:
     """In-process training environment backed by the authoritative reducer."""
 
-    def __init__(self, *, table_id: str = "training-table") -> None:
+    def __init__(self, *, table_id: str = "training-table", reward_shaping_weight: float = 0.0) -> None:
         self.table_id = table_id
         self.state = MatchState(table_id=table_id)
         self.controller_ids = {seat: f"training-controller-{seat.value}" for seat in SEATS}
         self._deal_start_hands: dict[Seat, tuple[str, ...]] = {}
+        self.reward_shaping_weight = reward_shaping_weight
 
     def reset(self, seed: str | int | bytes | None = None) -> MatchState:
         self.state = MatchState(table_id=self.table_id)
@@ -83,6 +84,11 @@ class GuandanTrainingEnv:
 
     def step(self, seat: Seat, action: ActionCandidate | CommandAction) -> EnvStep:
         command = action.to_command(self.controller_ids[seat], seat) if isinstance(action, ActionCandidate) else action
+        shaping = (
+            _action_shaping_rewards(self.state, seat, action, self.reward_shaping_weight)
+            if isinstance(action, ActionCandidate)
+            else {seat: 0.0 for seat in SEATS}
+        )
         previous_result = self.state.last_deal_result
         deal_level = self.state.current_level
         result = reduce_command(self.state, command)
@@ -93,6 +99,8 @@ class GuandanTrainingEnv:
             initial_hands=self._deal_start_hands,
             level=deal_level,
         )
+        if result.rejection is None and any(value != 0.0 for value in shaping.values()):
+            rewards = {seat_item: rewards[seat_item] + shaping[seat_item] for seat_item in SEATS}
         return EnvStep(state=self.state, events=result.events, rewards=rewards, rejection=result.rejection)
 
     def start_next_deal(self, seed: str | int | bytes | None = None) -> EnvStep:
@@ -168,6 +176,51 @@ def _rewards_for_transition(
         _add_team_reward(rewards, current.winning_team, reward_multiplier)
         _add_team_reward(rewards, _opposing_team(current.winning_team), -reward_multiplier)
     return rewards
+
+
+def _action_shaping_rewards(
+    state: MatchState,
+    seat: Seat,
+    action: ActionCandidate,
+    weight: float,
+) -> dict[Seat, float]:
+    rewards = {seat_item: 0.0 for seat_item in SEATS}
+    if weight <= 0.0 or state.deal is None:
+        return rewards
+    value = 0.0
+    if action.kind == "play_cards":
+        hand = state.deal.hand_for(seat)
+        finishes = len(action.card_ids) == len(hand)
+        opponent_danger = _has_dangerous_opponent(state, seat)
+        last_play_seat = state.deal.current_trick.last_play_seat
+        if finishes:
+            value += 0.08
+        if last_play_seat is not None and team_for_seat(last_play_seat) != team_for_seat(seat) and opponent_danger:
+            value += 0.05
+        if (
+            action.hand_type in {HandType.BOMB, HandType.STRAIGHT_FLUSH, HandType.FOUR_JOKERS}
+            and not finishes
+            and not opponent_danger
+        ):
+            value -= 0.04
+    elif action.kind == "pass":
+        last_play_seat = state.deal.current_trick.last_play_seat
+        if last_play_seat is not None and team_for_seat(last_play_seat) == team_for_seat(seat):
+            value += 0.02
+        elif last_play_seat is not None and _has_dangerous_opponent(state, seat):
+            value -= 0.04
+    rewards[seat] = value * weight
+    return rewards
+
+
+def _has_dangerous_opponent(state: MatchState, seat: Seat) -> bool:
+    if state.deal is None:
+        return False
+    own_team = team_for_seat(seat)
+    return any(
+        team_for_seat(other) != own_team and 0 < len(state.deal.hand_for(other)) <= 2
+        for other in SEATS
+    )
 
 
 def _reward_multiplier_for_result(result: DealResult, initial_hands: dict[Seat, tuple[str, ...]], level: Rank) -> float:

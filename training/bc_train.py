@@ -18,7 +18,7 @@ from training.bc_cache import (
 )
 from training.collect import BcSample, iter_jsonl
 from training.encode import ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION, encoding_schema
-from training.model import build_candidate_ranker, pair_feature_dim, require_torch
+from training.model import DEFAULT_MODEL_ARCHITECTURE, build_candidate_ranker, pair_feature_dim, require_torch
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,7 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     hidden_dim: int = 256
     dropout: float = 0.1
+    model_architecture: str = DEFAULT_MODEL_ARCHITECTURE
     validation_fraction: float = 0.1
     shuffle_buffer_size: int = 2048
     batch_size: int = 64
@@ -121,8 +122,11 @@ def train_behavior_clone(config: TrainingConfig) -> TrainingSummary:
 
     model = build_candidate_ranker(
         pair_feature_dim(dataset_info.observation_dim, dataset_info.action_dim),
+        observation_dim=dataset_info.observation_dim,
+        action_dim=dataset_info.action_dim,
         hidden_dim=config.hidden_dim,
         dropout=config.dropout,
+        architecture=config.model_architecture,
     ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -273,6 +277,7 @@ def train_behavior_clone(config: TrainingConfig) -> TrainingSummary:
             "action_dim": dataset_info.action_dim,
             "hidden_dim": config.hidden_dim,
             "dropout": config.dropout,
+            "model_architecture": config.model_architecture,
             "samples": dataset_info.samples,
             "train_samples": split.train_samples,
             "validation_samples": split.validation_samples,
@@ -316,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             learning_rate=args.learning_rate,
             hidden_dim=args.hidden_dim,
             dropout=args.dropout,
+            model_architecture=args.model_architecture,
             validation_fraction=args.validation_fraction,
             shuffle_buffer_size=args.shuffle_buffer_size,
             batch_size=args.batch_size,
@@ -982,6 +988,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--model-architecture", default=DEFAULT_MODEL_ARCHITECTURE)
     parser.add_argument("--validation-fraction", type=float, default=0.1)
     parser.add_argument("--shuffle-buffer-size", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=64, help="Mini-batch size for tensor-cache training.")

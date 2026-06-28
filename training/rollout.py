@@ -7,7 +7,7 @@ from server.domain.legal_actions import ActionCandidate
 from server.domain.seats import SEATS, Seat
 from server.domain.state import MatchPhase
 from server.services.snapshots import SeatSnapshot
-from training.encode import ENCODING_SCHEMA_VERSION, encode_action, encode_observation
+from training.encode import ENCODING_SCHEMA_VERSION, encode_action, encode_critic_observation, encode_observation
 from training.env import GuandanTrainingEnv
 from training.heuristic import HeuristicPolicy
 
@@ -42,6 +42,7 @@ class RolloutTransition:
     value: float
     reward: float = 0.0
     done: bool = False
+    critic_observation_values: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +68,10 @@ def collect_rollout(
     seed: str | int | bytes | None,
     max_deals: int = 1,
     max_steps: int = 20_000,
+    record_seats: frozenset[Seat] | None = None,
+    reward_shaping_weight: float = 0.0,
 ) -> RolloutResult:
-    env = GuandanTrainingEnv()
+    env = GuandanTrainingEnv(reward_shaping_weight=reward_shaping_weight)
     env.reset(seed=seed)
     transitions: list[RolloutTransition] = []
     latest_by_seat: dict[Seat, int] = {}
@@ -101,12 +104,29 @@ def collect_rollout(
 
         snapshot = env.observe(actor)
         actions = env.legal_actions(actor)
-        decision = policies[actor].choose_decision(snapshot, actions)
-        schema_version = str(getattr(policies[actor], "schema_version", ENCODING_SCHEMA_VERSION))
-        transitions.append(
-            _transition_from_decision(seed_label, snapshot, actions, decision, schema_version=schema_version)
-        )
-        latest_by_seat[actor] = len(transitions) - 1
+        policy = policies[actor]
+        if hasattr(policy, "choose_decision_with_state"):
+            decision = policy.choose_decision_with_state(snapshot, actions, env.state)
+        else:
+            decision = policy.choose_decision(snapshot, actions)
+        schema_version = str(getattr(policy, "schema_version", ENCODING_SCHEMA_VERSION))
+        if record_seats is None or actor in record_seats:
+            critic_values = (
+                encode_critic_observation(env.state, actor, schema_version=schema_version).values
+                if getattr(policy, "centralized_critic", False)
+                else ()
+            )
+            transitions.append(
+                _transition_from_decision(
+                    seed_label,
+                    snapshot,
+                    actions,
+                    decision,
+                    schema_version=schema_version,
+                    critic_observation_values=critic_values,
+                )
+            )
+            latest_by_seat[actor] = len(transitions) - 1
 
         step = env.step(actor, decision.action)
         steps += 1
@@ -127,6 +147,7 @@ def collect_heuristic_rollout(
     seed: str | int | bytes | None,
     max_deals: int = 1,
     max_steps: int = 20_000,
+    reward_shaping_weight: float = 0.0,
 ) -> RolloutResult:
     policy = HeuristicRolloutPolicy()
     return collect_rollout(
@@ -134,6 +155,7 @@ def collect_heuristic_rollout(
         seed=seed,
         max_deals=max_deals,
         max_steps=max_steps,
+        reward_shaping_weight=reward_shaping_weight,
     )
 
 
@@ -157,6 +179,7 @@ def _transition_from_decision(
     decision: RolloutDecision,
     *,
     schema_version: str = ENCODING_SCHEMA_VERSION,
+    critic_observation_values: tuple[float, ...] = (),
 ) -> RolloutTransition:
     observation = encode_observation(snapshot, schema_version=schema_version)
     action_vectors = tuple(encode_action(action, snapshot, schema_version=schema_version) for action in actions)
@@ -175,6 +198,7 @@ def _transition_from_decision(
         action_payload=decision.action.to_payload(),
         old_log_prob=decision.log_prob,
         value=decision.value,
+        critic_observation_values=critic_observation_values,
     )
 
 

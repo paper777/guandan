@@ -102,7 +102,13 @@ class _LoadedModel:
 
 
 def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
-    from training.model import build_candidate_actor_critic, build_candidate_ranker, pair_feature_dim, require_torch
+    from training.model import (
+        CONCAT_MLP_ARCHITECTURE,
+        build_candidate_actor_critic,
+        build_candidate_ranker,
+        pair_feature_dim,
+        require_torch,
+    )
 
     torch = require_torch()
     device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -112,26 +118,36 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
     schema_version = validate_encoding_schema(checkpoint)
     observation_dim = int(checkpoint["observation_dim"])
     action_dim = int(checkpoint["action_dim"])
+    critic_observation_dim = int(checkpoint.get("critic_observation_dim", observation_dim))
     hidden_dim = int(checkpoint.get("hidden_dim", 256))
     dropout = float(checkpoint.get("dropout", 0.0))
+    model_architecture = str(checkpoint.get("model_architecture") or CONCAT_MLP_ARCHITECTURE)
     model_state = checkpoint.get("model_state")
     if not isinstance(model_state, dict):
         raise ValueError("checkpoint is missing model_state")
 
-    if any(str(key).startswith("policy_net.") for key in model_state):
+    if _model_state_is_ppo(model_state):
         model = build_candidate_actor_critic(
             pair_feature_dim(observation_dim, action_dim),
             observation_dim,
+            action_dim=action_dim,
+            value_input_dim=critic_observation_dim,
             hidden_dim=hidden_dim,
             dropout=dropout,
+            architecture=model_architecture,
         ).to(device)
         model.load_state_dict(model_state)
         kind = "ppo"
-    elif any(str(key).startswith("net.") for key in model_state):
+    elif any(str(key).startswith("net.") for key in model_state) or any(
+        str(key).startswith("policy_net.") for key in model_state
+    ):
         model = build_candidate_ranker(
             pair_feature_dim(observation_dim, action_dim),
+            observation_dim=observation_dim,
+            action_dim=action_dim,
             hidden_dim=hidden_dim,
             dropout=dropout,
+            architecture=model_architecture,
         ).to(device)
         model.load_state_dict(model_state)
         kind = "bc"
@@ -139,3 +155,9 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
         raise ValueError("checkpoint model_state is neither PPO actor-critic nor BC ranker")
     model.eval()
     return _LoadedModel(torch, model, device, observation_dim, action_dim, kind, schema_version)
+
+
+def _model_state_is_ppo(model_state: dict[str, object]) -> bool:
+    return any(str(key).startswith("policy_net.") for key in model_state) and any(
+        str(key).startswith("value_net.") for key in model_state
+    )

@@ -10,7 +10,7 @@ from server.domain.comparator import RankContext
 from server.domain.hand_types import HandType
 from server.domain.legal_actions import ActionCandidate
 from server.domain.seats import SEATS, Seat, Team, team_for_seat
-from server.domain.state import MatchPhase
+from server.domain.state import MatchPhase, MatchState
 from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
 
@@ -208,6 +208,79 @@ def validate_encoding_schema(checkpoint: dict[str, object], *, schema_version: s
         ):
             return candidate_version
     return schema_version or "custom"
+
+
+def encode_critic_observation(
+    state: MatchState,
+    actor: Seat,
+    *,
+    schema_version: str | None = None,
+) -> EncodedVector:
+    _resolve_schema_version(schema_version)
+    names: list[str] = []
+    values: list[float] = []
+    deal = state.deal
+
+    _extend_one_hot(names, values, "critic_actor", [seat.value for seat in SEATS], actor.value)
+    _extend_one_hot(names, values, "critic_phase", [phase.value for phase in MatchPhase], state.phase.value)
+    _extend_one_hot(names, values, "critic_current_level", [rank.value for rank in STANDARD_RANKS], state.current_level.value)
+    _extend_one_hot(
+        names,
+        values,
+        "critic_current_turn",
+        [seat.value for seat in SEATS],
+        deal.turn.value if deal is not None else None,
+    )
+    for team in Team:
+        names.append(f"critic_team_level/{team.value}")
+        values.append(_standard_rank_index(state.scores.level_by_team[team]) / (len(STANDARD_RANKS) - 1))
+    finish_positions = {seat: index + 1 for index, seat in enumerate(deal.finish_order)} if deal is not None else {}
+    active_seats = deal.active_seats if deal is not None else frozenset()
+    for seat in SEATS:
+        hand = deal.hand_for(seat) if deal is not None else ()
+        names.append(f"critic_active/{seat.value}")
+        values.append(1.0 if seat in active_seats else 0.0)
+        names.append(f"critic_hand_count/{seat.value}")
+        values.append(len(hand) / 27.0)
+        names.append(f"critic_finish_position/{seat.value}")
+        values.append(finish_positions.get(seat, 0) / 4.0)
+        counts = _face_counts(hand)
+        for face in CARD_FACES:
+            names.append(f"critic_hand_face/{seat.value}/{face}")
+            values.append(counts.get(face, 0) / 2.0)
+
+    played_counts = _face_counts(deal.played_card_ids) if deal is not None else {}
+    for face in CARD_FACES:
+        names.append(f"critic_played_face/{face}")
+        values.append(played_counts.get(face, 0) / 2.0)
+
+    trick = deal.current_trick if deal is not None else None
+    _extend_one_hot(
+        names,
+        values,
+        "critic_trick_last_seat",
+        [seat.value for seat in SEATS],
+        trick.last_play_seat.value if trick is not None and trick.last_play_seat is not None else None,
+    )
+    _extend_one_hot(
+        names,
+        values,
+        "critic_trick_hand_type",
+        [hand_type.value for hand_type in HandType],
+        trick.last_play.type.value if trick is not None and trick.last_play is not None else None,
+    )
+    _extend_one_hot(
+        names,
+        values,
+        "critic_trick_primary_rank",
+        [rank.value for rank in Rank],
+        trick.last_play.primary_rank.value if trick is not None and trick.last_play is not None else None,
+    )
+    names.append("critic_trick_length")
+    values.append((trick.last_play.length if trick is not None and trick.last_play is not None else 0) / 8.0)
+    names.append("critic_trick_pass_count")
+    values.append((trick.pass_count if trick is not None else 0) / 3.0)
+    return EncodedVector(tuple(names), tuple(values))
 
 
 def _append_action_context_features(

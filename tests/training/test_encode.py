@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from server.domain.seats import Seat
-from training.encode import CARD_FACES, encode_action, encode_observation, encoding_schema
+from training.encode import CARD_FACES, encode_action, encode_critic_observation, encode_observation, encoding_schema
 from training.env import GuandanTrainingEnv
 
 
@@ -43,6 +43,21 @@ class EncodingTests(unittest.TestCase):
         after = encode_observation(env.observe(Seat.EAST))
 
         self.assertEqual(before, after)
+
+    def test_critic_encoding_can_use_training_private_state(self) -> None:
+        env = GuandanTrainingEnv()
+        env.reset(seed="critic-seed")
+        before = encode_critic_observation(env.state, Seat.EAST)
+        assert env.state.deal is not None
+        hands = dict(env.state.deal.hands)
+        hands[Seat.SOUTH] = tuple(reversed(hands[Seat.WEST]))
+        env.state = replace(env.state, deal=replace(env.state.deal, hands=hands))
+
+        after = encode_critic_observation(env.state, Seat.EAST)
+
+        self.assertEqual(len(before.names), len(before.values))
+        self.assertIn("critic_hand_face/S/S-3", before.names)
+        self.assertNotEqual(before, after)
 
     def test_action_encoding_marks_length_and_remaining_count(self) -> None:
         env = GuandanTrainingEnv()

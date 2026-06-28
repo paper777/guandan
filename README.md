@@ -76,13 +76,13 @@ uv run --extra train guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc
 Train the behavior-cloning candidate ranker on CUDA:
 
 ```bash
-uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --device cuda
+uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --model-architecture dual_tower_v1 --device cuda
 ```
 
 Run a PPO self-play continuation run on CUDA:
 
 ```bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --device cuda
+uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --opponent-pool self,heuristic,dummy,previous --reward-shaping-start 0.02 --reward-shaping-end 0.0 --device cuda
 ```
 
 Evaluate a checkpoint against fixed dummy, heuristic, and previous-model gates:

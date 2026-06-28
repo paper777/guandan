@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from training.ppo_train import (
     PpoConfig,
@@ -9,8 +10,10 @@ from training.ppo_train import (
     _initial_dimensions,
     _initial_model_state_from_checkpoint,
     _iter_batches,
+    _linear_decay,
     _parser,
     _policy_state_from_bc_checkpoint,
+    _rollout_jobs_for_update,
     _rollout_metrics,
     _rollout_seeds_from_args,
 )
@@ -44,10 +47,12 @@ class RolloutTests(unittest.TestCase):
 
 class PpoScaffoldTests(unittest.TestCase):
     def test_initial_dimensions_come_from_training_environment(self) -> None:
-        observation_dim, action_dim = _initial_dimensions("1")
+        observation_dim, action_dim, critic_dim, critic_names = _initial_dimensions("1")
 
         self.assertGreater(observation_dim, 0)
         self.assertGreater(action_dim, 0)
+        self.assertGreater(critic_dim, observation_dim)
+        self.assertIn("critic_actor/E", critic_names)
 
     def test_parser_uses_default_seed_when_seed_is_omitted(self) -> None:
         args = _parser().parse_args(["model.pt"])
@@ -89,6 +94,10 @@ class PpoScaffoldTests(unittest.TestCase):
         self.assertAlmostEqual(args.max_grad_norm, 0.5)
         self.assertAlmostEqual(args.target_kl, 0.03)
         self.assertAlmostEqual(args.dropout, 0.0)
+        self.assertIsNone(args.centralized_critic)
+        self.assertEqual(args.opponent_pool, "self")
+        self.assertEqual(args.rollout_workers, 1)
+        self.assertAlmostEqual(args.reward_shaping_start, 0.02)
 
     def test_parser_accepts_bc_policy_initialization_checkpoint(self) -> None:
         args = _parser().parse_args(["model.pt", "--init-policy", "bc.pt"])
@@ -99,6 +108,32 @@ class PpoScaffoldTests(unittest.TestCase):
         args = _parser().parse_args(["model.pt", "--init-model", "ppo.pt"])
 
         self.assertEqual(args.init_policy, "ppo.pt")
+
+    def test_parser_accepts_late_optimization_flags(self) -> None:
+        args = _parser().parse_args([
+            "model.pt",
+            "--model-architecture",
+            "dual_tower_v1",
+            "--centralized-critic",
+            "--opponent-pool",
+            "self,heuristic,dummy,previous",
+            "--opponent-checkpoint",
+            "history.pt",
+            "--rollout-workers",
+            "2",
+            "--reward-shaping-start",
+            "0.05",
+            "--reward-shaping-end",
+            "0.01",
+        ])
+
+        self.assertEqual(args.model_architecture, "dual_tower_v1")
+        self.assertTrue(args.centralized_critic)
+        self.assertEqual(args.opponent_pool, "self,heuristic,dummy,previous")
+        self.assertEqual(args.opponent_checkpoint, ["history.pt"])
+        self.assertEqual(args.rollout_workers, 2)
+        self.assertAlmostEqual(args.reward_shaping_start, 0.05)
+        self.assertAlmostEqual(args.reward_shaping_end, 0.01)
 
     def test_gae_returns_and_advantages_follow_seat_trajectory(self) -> None:
         transitions = (
@@ -135,6 +170,27 @@ class PpoScaffoldTests(unittest.TestCase):
         self.assertEqual(metrics.completed_deals, 5)
         self.assertEqual(metrics.steps, 26)
         self.assertEqual(_format_stop_counts(metrics.stopped_reasons), "match_complete:1,max_deals:2")
+
+    def test_opponent_pool_expands_seed_jobs_by_candidate_team(self) -> None:
+        jobs = _rollout_jobs_for_update(
+            PpoConfig(
+                output_path=Path("model.pt"),
+                rollout_seeds=("seed",),
+                opponent_pool=("heuristic,dummy",),
+            ),
+            current_policy=object(),
+            update_index=0,
+            device_name="cpu",
+            reward_shaping_weight=0.0,
+        )
+
+        self.assertEqual(len(jobs), 4)
+        self.assertTrue(all(job.record_seats is not None for job in jobs))
+
+    def test_reward_shaping_weight_decays_linearly(self) -> None:
+        self.assertAlmostEqual(_linear_decay(0.05, 0.01, 0, 5), 0.05)
+        self.assertAlmostEqual(_linear_decay(0.05, 0.01, 4, 5), 0.01)
+        self.assertAlmostEqual(_linear_decay(0.05, 0.01, 2, 5), 0.03)
 
     def test_bc_checkpoint_policy_state_maps_ranker_net_to_actor_policy(self) -> None:
         checkpoint = {
@@ -185,6 +241,32 @@ class PpoScaffoldTests(unittest.TestCase):
 
         self.assertEqual(kind, "bc")
         self.assertEqual(model_state, {"0.weight": "w0", "0.bias": "b0"})
+
+    def test_initial_checkpoint_state_maps_dual_tower_bc_ranker_for_bootstrap(self) -> None:
+        checkpoint = {
+            "observation_dim": 3,
+            "action_dim": 2,
+            "hidden_dim": 4,
+            "model_architecture": "dual_tower_v1",
+            "model_state": {
+                "policy_net.state_encoder.0.weight": "sw0",
+                "policy_net.action_encoder.0.weight": "aw0",
+            },
+        }
+
+        kind, model_state = _initial_model_state_from_checkpoint(
+            checkpoint,
+            3,
+            2,
+            4,
+            model_architecture="dual_tower_v1",
+        )
+
+        self.assertEqual(kind, "bc")
+        self.assertEqual(
+            model_state,
+            {"state_encoder.0.weight": "sw0", "action_encoder.0.weight": "aw0"},
+        )
 
     def test_bc_checkpoint_policy_state_rejects_dimension_mismatch(self) -> None:
         checkpoint = {

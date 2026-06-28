@@ -99,6 +99,16 @@ class GuandanTrainingEnvTests(unittest.TestCase):
         self.assertLess(strong_profile.estimated_turns, weak_profile.estimated_turns)
         self.assertGreater(strong_profile.strength_score, weak_profile.strength_score)
 
+    def test_reward_shaping_can_reward_finishing_action(self) -> None:
+        env = GuandanTrainingEnv(reward_shaping_weight=1.0)
+        env.reset(seed="shaping-seed")
+        env.state = _one_card_not_complete_state(env)
+
+        step = env.step(Seat.EAST, _action_by_cards(env, Seat.EAST, ("D1-S-A",)))
+
+        self.assertIsNone(step.rejection)
+        self.assertAlmostEqual(step.rewards[Seat.EAST], 0.08)
+
     def test_reward_multiplier_discounts_strong_winners_and_rewards_upsets(self) -> None:
         initial_hands = {
             Seat.EAST: (
@@ -180,6 +190,26 @@ def _one_card_double_down_state(env: GuandanTrainingEnv):
         Seat.SOUTH: ("D1-S-4",),
         Seat.WEST: ("D1-S-K",),
         Seat.NORTH: ("D1-S-3",),
+    }
+    env._deal_start_hands = hands
+    deal = DealState(
+        hands=hands,
+        active_seats=frozenset(SEATS),
+        finish_order=(),
+        leader=Seat.EAST,
+        turn=Seat.EAST,
+        current_trick=TrickState(lead_seat=Seat.EAST),
+    )
+    return replace(env.state, phase=MatchPhase.PLAYING, deal=deal)
+
+
+def _one_card_not_complete_state(env: GuandanTrainingEnv):
+    assert env.state.deal is not None
+    hands = {
+        Seat.EAST: ("D1-S-A",),
+        Seat.SOUTH: ("D1-S-4", "D1-H-4"),
+        Seat.WEST: ("D1-S-K", "D1-H-K"),
+        Seat.NORTH: ("D1-S-3", "D1-H-3"),
     }
     env._deal_start_hands = hands
     deal = DealState(

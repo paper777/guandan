@@ -336,8 +336,9 @@ GPU smoke run 记录：
 BC ranker：
 
 ```text
-pair_features = concat(observation, action)  # v1: 140+88, v2: 195+96
-MLP(pair_dim -> hidden -> hidden -> 1)
+state = state_encoder(observation)
+action = action_encoder(candidate)
+score = MLP([state, action, state * action, abs(state - action)])
 softmax(score over legal candidates)
 CrossEntropy(chosen_index)
 ```
@@ -345,17 +346,17 @@ CrossEntropy(chosen_index)
 PPO actor-critic：
 
 ```text
-policy_net: MLP(pair_features -> hidden -> hidden -> 1)
-value_net:  MLP(observation -> hidden -> hidden -> 1)
+policy_net: same dual-tower candidate scorer
+value_net:  MLP(critic_observation -> hidden -> hidden -> 1)
 ```
 
-默认 `hidden_dim=256` 时，模型规模仍是轻量级 MLP。这个规模非常适合低延迟 smoke run 和线上 fallback 验证，但明显小于最初建议的 5M 到 30M 参数区间，表达能力可能不足以稳定学会复杂拆牌、控牌、让牌和进贡策略。
+默认新训练使用 `dual_tower_v1`。旧 checkpoint 没有 `model_architecture` 时按 `concat_mlp` 加载，保证 `data/models/ppo_actor_critic.pt` 仍可继续训练。默认 `hidden_dim=256` 时，模型规模仍偏轻量，适合低延迟 smoke run 和线上 fallback 验证，但仍明显小于最初建议的 5M 到 30M 参数区间。
 
-当前实现与初始设计的差异：
+当前仍保留的差异：
 
-- 初始设计建议 `state_encoder`、`action_encoder` 和 `h * a` 交互项；当前实现是简单 concat 后 MLP。
-- 初始设计建议 centralized critic 可看完整训练 state；当前 value head 只看 actor observation，是 decentralized critic。
-- 当前没有模型池或历史对手池，PPO 自博弈四个座位都使用同一个最新策略。
+- actor/critic 仍是浅层 MLP，没有注意力、recurrent state 或更大参数量。
+- centralized critic 目前使用固定手写全状态特征，还没有学习式 public/private state encoder。
+- opponent pool 已接入训练入口，但历史 checkpoint 的采样比例和晋级阈值还需要长期评测数据校准。
 
 这些差异让第一版实现更简单、更容易上线，但 PPO 方差和策略泛化能力会受到限制。
 
@@ -389,9 +390,9 @@ PPO 当前流程：
 
 1. 用 `_initial_dimensions()` 从训练环境首个合法决策推导 observation/action 维度。
 2. 可用 BC checkpoint 初始化 `policy_net`，或用已有 PPO actor-critic checkpoint 完整恢复 `policy_net` 和 `value_net`，并校验 observation/action/hidden 维度。
-3. 每个 update 对每个 rollout seed 做一局或多局自博弈，四个座位共享同一个 `TorchRolloutPolicy`。
-4. rollout 记录 observation、候选动作、采样动作 index、old log prob、value、reward 和 done。
-5. reward 在 deal/match 结束时结合开局手牌强度系数回填到每个座位最近一次 transition，再按 seat 反向计算 GAE。
+3. 每个 update 对每个 rollout seed 做一局或多局 rollout；可纯 self-play，也可让当前模型按队伍轮换对战 heuristic、dummy、previous 或历史 checkpoint。
+4. rollout 记录 observation、候选动作、采样动作 index、old log prob、critic value、reward、done 和可选 centralized critic observation。
+5. reward 在 deal/match 结束时结合开局手牌强度系数回填到每个座位最近一次 transition；PPO 可叠加小权重 shaping 并按 update 线性衰减，再按 seat 反向计算 GAE。
 6. PPO loss 使用 clipped policy loss、MSE value loss、entropy bonus、gradient clipping 和 target KL early stop。
 
 PPO 初始化约束（2026-06-27）：
@@ -399,13 +400,14 @@ PPO 初始化约束（2026-06-27）：
 - `HeuristicPolicy` 只用于 BC 采样、固定评测和线上安全 fallback；PPO rollout actor 必须来自 `TorchRolloutPolicy` 包装的模型。
 - `--init-policy` 保持向后兼容，可接收 BC ranker 或 PPO actor-critic checkpoint；新增同义参数 `--init-model`，用于表达从已训练 PPO 模型继续训练。
 - BC ranker checkpoint 只把 `net.*` 映射到 `policy_net.*`，critic 仍在 PPO 中学习；PPO checkpoint 则完整加载 actor 和 critic，使持续训练基于已训练模型而不是重新依赖启发式教师。
+- checkpoint 保存 `model_architecture`、`centralized_critic` 和 `critic_observation_dim`；旧 checkpoint 缺失这些字段时按 `concat_mlp` 和 decentralized critic 兼容加载。
 
 当前 PPO 是可运行 scaffold，但还不是高吞吐或强评测版本：
 
-- rollout 单进程串行，吞吐主要受动作枚举和 Python reducer 限制。
-- 没有 opponent pool，容易产生同策略自博弈的过拟合和循环策略。
-- critic 只看 actor observation，优势估计信息少；如果训练中允许 critic 看全状态，可以加 centralized critic 提升稳定性。
-- reward 主要是局末/比赛末稀疏奖励，早期 PPO 对 BC 初始化质量依赖较强。
+- rollout 可按 job 用线程并行，但当前默认 `rollout_workers=1`；主要长尾仍来自 Python 候选枚举，CPU opponent-pool smoke 会比较慢。
+- opponent pool 已具备 self、heuristic、dummy、previous 和额外 checkpoint 输入，但还没有 Elo/胜率驱动的自动历史池采样权重。
+- centralized critic 已能看完整训练 state；后续需要验证它对 value loss 和策略稳定性的实际收益。
+- reward 仍以局末/比赛末为主，shaping 只做小权重辅助并默认衰减，避免模型锁死在局部启发式。
 - 已有固定评测门禁入口和脚本集成，但当前默认 seed/deal 数较小，只适合作为训练产物 smoke gate；正式模型晋级还需要更大 seed 池和统计阈值。
 
 ### 线上推理接入
@@ -542,3 +544,80 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
   `action_beats_partner`、`action_beats_opponent`、`action_finishes_hand`、`action_opponent_danger`、`action_rank_margin`、`action_breaks_bomb`、`action_breaks_sequence`、`action_breaks_pair_run`。
 - BC/PPO/线上模型加载路径统一按 checkpoint schema 选择 v1 或 v2 编码。
 - `tests/training/test_encode.py` 覆盖新增 action feature names 和字段存在性。
+
+## 优化建议后五条执行设计与进度（2026-06-28）
+
+本轮执行优化建议 6-10。实现原则是保留旧 checkpoint 兼容，新增能力默认用于新训练；从旧 PPO checkpoint 继续训练时优先完整加载旧结构，不强制迁移架构。
+
+### 6. State/action 双塔模型
+
+设计：
+
+- 新增 `dual_tower_v1`：`state_encoder(obs)`、`action_encoder(action)`，再用 `[h, a, h*a, abs(h-a)]` 打分。
+- BC ranker 和 PPO actor 共用同一种候选 scorer；旧 `concat_mlp` 继续保留。
+- checkpoint 写入 `model_architecture`；旧 checkpoint 缺失该字段时按 `concat_mlp` 读取。
+
+已执行：
+
+- `training/model.py` 新增 `DEFAULT_MODEL_ARCHITECTURE=dual_tower_v1`、双塔 scorer 和兼容的 concat MLP builder。
+- `training/bc_train.py` 支持 `--model-architecture`，新 BC 默认输出 dual tower checkpoint。
+- `training/ppo_train.py` 从 checkpoint 推断 architecture；无 init 时默认 dual tower，从旧 PPO 继续时保持旧 concat 结构。
+- `npc/rl_agent/model_loader.py` 可加载 dual tower BC/PPO checkpoint。
+
+### 7. Centralized critic
+
+设计：
+
+- actor 仍只看 `SeatSnapshot` observation/action features。
+- critic 在训练时可看完整 `MatchState`，包括四家手牌、active/finish、已出牌统计和当前 trick。
+- checkpoint 写入 `centralized_critic`、`critic_observation_dim` 和 feature names；旧 checkpoint 自动按 decentralized critic 加载。
+
+已执行：
+
+- `training/encode.py` 新增 `encode_critic_observation(state, actor)`。
+- `training/rollout.py` 在 centralized critic policy 采样时保存 critic observation values。
+- `training/ppo_train.py` 的 value head 可使用 critic observation；PPO batch loss 也按该输入计算 value。
+- `tests/training/test_encode.py` 验证 actor observation 不看对手私有手牌，而 critic encoding 可以使用训练专用 full state。
+
+### 8. Opponent pool
+
+设计：
+
+- `--opponent-pool` 接收 `self`、`heuristic`、`dummy`、`previous`。
+- `--opponent-checkpoint` 可重复传入历史 checkpoint。
+- 非 self 对手时，当前模型按东西/南北两队轮换，只记录当前模型座位的 PPO transitions，避免把 frozen opponent 的动作拿来更新当前策略。
+
+已执行：
+
+- `training/ppo_train.py` 新增 opponent pool job 构建、dummy/heuristic adapter 和 frozen checkpoint adapter。
+- `scripts/ppo_train.sh` 默认使用 `self,heuristic,dummy,previous`，previous 指 `BASE_MODEL`。
+- `tests/training/test_rollout_ppo.py` 覆盖 opponent pool 按 candidate team 展开 rollout jobs。
+
+### 9. Rollout 吞吐
+
+设计：
+
+- 将 rollout 抽象成 jobs，支持按 seed/opponent/team 组合拆分。
+- `--rollout-workers` 使用线程并行收集 jobs；默认仍为 1，避免默认训练变成非确定性的多线程 torch 采样。
+- `TorchRolloutPolicy` 用 lock 包住模型 eval/inference，防止多线程下 train/eval 状态竞争。
+
+已执行：
+
+- `training/ppo_train.py` 新增 `_collect_rollout_jobs()` 和 `--rollout-workers`。
+- `scripts/ppo_train.sh` 暴露 `ROLLOUT_WORKERS`。
+- CPU 上 opponent pool 完整对局仍可能被候选枚举长尾拖慢；真实吞吐提升需要在 CUDA/长时训练中结合 `candidate_generation_cache_info()` 继续观察。
+
+### 10. 分阶段奖励 shaping
+
+设计：
+
+- 环境默认 `reward_shaping_weight=0`，普通测试和非 PPO 调用不改变。
+- PPO 通过 `--reward-shaping-start`、`--reward-shaping-end` 按 update 线性衰减 shaping。
+- 第一版 shaping 只给小权重局部信号：终结出完、拦截危险对手、同伴领先时 pass；非关键时机乱用炸弹略扣分。
+
+已执行：
+
+- `training/env.py` 新增 action-level shaping reward。
+- `training/rollout.py` 将 `reward_shaping_weight` 传入环境。
+- `training/ppo_train.py` 每个 update 计算线性衰减权重。
+- `tests/training/test_env.py` 覆盖显式开启 shaping 后的终结出完奖励；`tests/training/test_rollout_ppo.py` 覆盖线性衰减计算。

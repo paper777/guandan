@@ -11,6 +11,10 @@ MAX_DEALS="${MAX_DEALS:-32}"
 BATCH_SIZE="${BATCH_SIZE:-1024}"
 MAX_STEPS="${MAX_STEPS:-50000}"
 DEVICE="${DEVICE:-cuda}"
+OPPONENT_POOL="${OPPONENT_POOL:-self,heuristic,dummy,previous}"
+ROLLOUT_WORKERS="${ROLLOUT_WORKERS:-1}"
+REWARD_SHAPING_START="${REWARD_SHAPING_START:-0.02}"
+REWARD_SHAPING_END="${REWARD_SHAPING_END:-0.0}"
 EVAL_SEED_COUNT="${EVAL_SEED_COUNT:-4}"
 EVAL_MAX_DEALS="${EVAL_MAX_DEALS:-1}"
 EVAL_MAX_STEPS="${EVAL_MAX_STEPS:-20000}"
@@ -37,6 +41,10 @@ uv run --extra train guandan-ppo-train "${OUTPUT_MODEL}" \
   --max-grad-norm 0.5 \
   --target-kl 0.03 \
   --dropout 0.0 \
+  --opponent-pool "${OPPONENT_POOL}" \
+  --rollout-workers "${ROLLOUT_WORKERS}" \
+  --reward-shaping-start "${REWARD_SHAPING_START}" \
+  --reward-shaping-end "${REWARD_SHAPING_END}" \
   --device "${DEVICE}"
 
 if [[ "${EVAL_SEED_COUNT}" != "0" ]]; then
