@@ -310,8 +310,17 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
     hand = list(state.deal.hand_for(command.seat))
     if len(set(command.card_ids)) != len(command.card_ids) or not set(command.card_ids).issubset(set(hand)):
         return _reject(state, RejectCode.CARD_NOT_OWNED, "one or more cards are not in the seat's hand")
+    resolve_ambiguous = command.declared_type is None and _is_undeclared_wildcard_lead(
+        state,
+        command.card_ids,
+    )
     try:
-        played_hand = parse_hand(resolve_cards(command.card_ids), command.declared_type, level=state.current_level)
+        played_hand = parse_hand(
+            resolve_cards(command.card_ids),
+            command.declared_type,
+            level=state.current_level,
+            resolve_ambiguous=resolve_ambiguous,
+        )
     except AmbiguousHandError as exc:
         return _reject(state, RejectCode.AMBIGUOUS_WILD_CARD_DECLARATION, str(exc))
     except ValueError as exc:
@@ -373,6 +382,12 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
         next_state = completed.state
         events.extend(completed.events)
     return ReducerResult(state=next_state, events=tuple(events))
+
+
+def _is_undeclared_wildcard_lead(state: MatchState, card_ids: tuple[str, ...]) -> bool:
+    if state.deal is None or state.deal.current_trick.last_play is not None:
+        return False
+    return any(is_red_heart_level_card(CARD_BY_ID[card_id], state.current_level) for card_id in card_ids)
 
 
 def _completed_finish_order(finish_order: tuple[Seat, ...], active: frozenset[Seat]) -> tuple[Seat, ...] | None:

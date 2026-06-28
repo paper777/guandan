@@ -20,6 +20,9 @@ class RankContext:
         base_order = {rank_value: index for index, rank_value in enumerate(STANDARD_RANKS)}
         return base_order[rank]
 
+    def sequence_value(self, rank: Rank) -> int:
+        return STANDARD_RANKS.index(rank)
+
 
 def can_beat(candidate: PlayedHand, current: PlayedHand | None, level: Rank) -> bool:
     if current is None:
@@ -36,7 +39,7 @@ def can_beat(candidate: PlayedHand, current: PlayedHand | None, level: Rank) -> 
 
     if candidate.type != current.type or candidate.length != current.length:
         return False
-    return ctx.rank_value(candidate.primary_rank) > ctx.rank_value(current.primary_rank)
+    return _primary_rank_value(candidate, ctx) > _primary_rank_value(current, ctx)
 
 
 def _bomb_like_can_beat(candidate: PlayedHand, current: PlayedHand, ctx: RankContext) -> bool:
@@ -54,7 +57,7 @@ def _bomb_like_can_beat(candidate: PlayedHand, current: PlayedHand, ctx: RankCon
         return candidate.length >= 6
 
     if candidate.type == HandType.STRAIGHT_FLUSH and current.type == HandType.STRAIGHT_FLUSH:
-        return ctx.rank_value(candidate.primary_rank) > ctx.rank_value(current.primary_rank)
+        return _primary_rank_value(candidate, ctx) > _primary_rank_value(current, ctx)
 
     if candidate.type == HandType.BOMB and current.type == HandType.BOMB:
         if candidate.length != current.length:
@@ -62,3 +65,9 @@ def _bomb_like_can_beat(candidate: PlayedHand, current: PlayedHand, ctx: RankCon
         return ctx.rank_value(candidate.primary_rank) > ctx.rank_value(current.primary_rank)
 
     return False
+
+
+def _primary_rank_value(hand: PlayedHand, ctx: RankContext) -> int:
+    if hand.type in {HandType.STRAIGHT, HandType.STRAIGHT_FLUSH, HandType.THREE_PAIR_RUN, HandType.TRIPLE_RUN}:
+        return ctx.sequence_value(hand.primary_rank)
+    return ctx.rank_value(hand.primary_rank)

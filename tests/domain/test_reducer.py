@@ -6,6 +6,7 @@ from dataclasses import replace
 from server.domain.commands import JoinTable, Pass, PlayCards, Ready, ReturnTribute, StartMatch, SubmitTribute
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.events import RejectCode
+from server.domain.hand_types import HandType
 from server.domain.reducer import reduce_command
 from server.domain.cards import Rank
 from server.domain.seats import SEATS, Seat, Team
@@ -210,6 +211,41 @@ class ReducerTests(unittest.TestCase):
         self.assertIsNotNone(result.rejection)
         assert result.rejection is not None
         self.assertEqual(result.rejection.code, RejectCode.AMBIGUOUS_WILD_CARD_DECLARATION)
+
+    def test_undeclared_wildcard_lead_uses_largest_full_house(self) -> None:
+        cases = [
+            (
+                ("D1-S-5", "D2-S-5", "D1-H-6", "D2-H-6", "D1-S-6"),
+                Rank.SIX,
+            ),
+            (
+                ("D1-S-5", "D2-S-5", "D1-S-7", "D2-S-7", "D1-H-6"),
+                Rank.SEVEN,
+            ),
+        ]
+
+        for card_ids, expected_rank in cases:
+            with self.subTest(card_ids=card_ids):
+                state = replace(started_state(), current_level=Rank.SIX)
+                state = self._give_hands(
+                    state,
+                    {
+                        Seat.EAST: card_ids,
+                        Seat.NORTH: ("D1-S-8",),
+                        Seat.WEST: ("D1-S-9",),
+                        Seat.SOUTH: ("D1-S-10",),
+                    },
+                )
+
+                result = reduce_command(state, PlayCards(controller(Seat.EAST).id, Seat.EAST, card_ids))
+
+                self.assertIsNone(result.rejection)
+                self.assertEqual(result.events[0].payload["hand_type"], HandType.FULL_HOUSE.value)
+                assert result.state.deal is not None
+                played = result.state.deal.current_trick.last_play
+                assert played is not None
+                self.assertEqual(played.type, HandType.FULL_HOUSE)
+                self.assertEqual(played.primary_rank, expected_rank)
 
     def test_finished_player_final_trick_lead_borrows_to_partner(self) -> None:
         state = started_state()

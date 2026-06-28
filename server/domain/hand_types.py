@@ -56,7 +56,13 @@ SEQUENCE_RANKS: tuple[Rank, ...] = (
 )
 
 
-def parse_hand(cards: tuple[Card, ...], declared_type: str | None = None, level: Rank = Rank.TWO) -> PlayedHand:
+def parse_hand(
+    cards: tuple[Card, ...],
+    declared_type: str | None = None,
+    level: Rank = Rank.TWO,
+    *,
+    resolve_ambiguous: bool = False,
+) -> PlayedHand:
     if not cards:
         raise ValueError("empty play is not a hand")
     card_ids = tuple(card.id for card in cards)
@@ -65,11 +71,16 @@ def parse_hand(cards: tuple[Card, ...], declared_type: str | None = None, level:
         candidates = [hand for hand in candidates if hand.type.value == declared_type]
     if not candidates:
         raise ValueError("cards do not form a supported Guandan hand")
-    if len(candidates) > 1 and declared_type is not None:
-        return max(candidates, key=lambda hand: _rank_sort_value(hand.primary_rank, level))
+    if len(candidates) > 1 and (declared_type is not None or resolve_ambiguous):
+        return max(candidates, key=lambda hand: _hand_sort_key(hand, level))
     if len(candidates) > 1 and declared_type is None:
         raise AmbiguousHandError("hand is ambiguous; declared_type is required")
     return candidates[0]
+
+
+def _hand_sort_key(hand: PlayedHand, level: Rank) -> tuple[int, int]:
+    type_order = {hand_type: index for index, hand_type in enumerate(HandType)}
+    return type_order[hand.type], _rank_sort_value(hand.primary_rank, level)
 
 
 def _rank_sort_value(rank: Rank, level: Rank) -> int:
