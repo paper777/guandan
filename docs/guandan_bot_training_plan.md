@@ -404,7 +404,7 @@ PPO 初始化约束（2026-06-27）：
 
 当前 PPO 是可运行 scaffold，但还不是高吞吐或强评测版本：
 
-- rollout 可按 job 用线程并行，但当前默认 `rollout_workers=1`；主要长尾仍来自 Python 候选枚举，CPU opponent-pool smoke 会比较慢。
+- rollout 可按 job 用线程并行；训练脚本默认 `ROLLOUT_WORKERS=4`，主要长尾仍来自 Python 候选枚举，CPU opponent-pool smoke 会比较慢。
 - opponent pool 已具备 self、heuristic、dummy、previous 和额外 checkpoint 输入，但还没有 Elo/胜率驱动的自动历史池采样权重。
 - centralized critic 已能看完整训练 state；后续需要验证它对 value loss 和策略稳定性的实际收益。
 - reward 仍以局末/比赛末为主，shaping 只做小权重辅助并默认衰减，避免模型锁死在局部启发式。
@@ -598,13 +598,13 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 设计：
 
 - 将 rollout 抽象成 jobs，支持按 seed/opponent/team 组合拆分。
-- `--rollout-workers` 使用线程并行收集 jobs；默认仍为 1，避免默认训练变成非确定性的多线程 torch 采样。
+- `--rollout-workers` 使用线程并行收集 jobs；命令默认仍为 1，`scripts/ppo_train.sh` 默认提升为 4，以匹配 `self,heuristic,dummy,previous` opponent pool 展开的多 rollout jobs。
 - `TorchRolloutPolicy` 用 lock 包住模型 eval/inference，防止多线程下 train/eval 状态竞争。
 
 已执行：
 
 - `training/ppo_train.py` 新增 `_collect_rollout_jobs()` 和 `--rollout-workers`。
-- `scripts/ppo_train.sh` 暴露 `ROLLOUT_WORKERS`。
+- `scripts/ppo_train.sh` 暴露 `ROLLOUT_WORKERS`，默认值为 4；CPU/GPU 争用明显时可下调，候选枚举仍是主要长尾时可继续上调观察。
 - CPU 上 opponent pool 完整对局仍可能被候选枚举长尾拖慢；真实吞吐提升需要在 CUDA/长时训练中结合 `candidate_generation_cache_info()` 继续观察。
 
 ### 10. 分阶段奖励 shaping

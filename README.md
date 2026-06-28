@@ -82,8 +82,10 @@ uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/mo
 Run a PPO self-play continuation run on CUDA:
 
 ```bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --opponent-pool self,heuristic,dummy,previous --reward-shaping-start 0.02 --reward-shaping-end 0.0 --device cuda
+uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --opponent-pool self,heuristic,dummy,previous --rollout-workers 4 --reward-shaping-start 0.02 --reward-shaping-end 0.0 --device cuda
 ```
+
+`scripts/ppo_train.sh` defaults to `ROLLOUT_WORKERS=4` for opponent-pool rollouts; override it when CPU contention or GPU inference saturation becomes the bottleneck.
 
 Evaluate a checkpoint against fixed dummy, heuristic, and previous-model gates:
 

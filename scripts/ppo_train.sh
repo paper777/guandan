@@ -3,7 +3,7 @@ set -euo pipefail
 
 BASE_MODEL="${BASE_MODEL:-data/models/ppo_actor_critic.pt}"
 OUTPUT_MODEL="${OUTPUT_MODEL:-data/models/ppo_actor_critic.next.pt}"
-SEED_COUNT="${SEED_COUNT:-10}"
+SEED_COUNT="${SEED_COUNT:-4}"
 UPDATES="${UPDATES:-100}"
 EPOCHS_PER_UPDATE="${EPOCHS_PER_UPDATE:-3}"
 MAX_DEALS="${MAX_DEALS:-32}"
@@ -12,7 +12,8 @@ BATCH_SIZE="${BATCH_SIZE:-1024}"
 MAX_STEPS="${MAX_STEPS:-50000}"
 DEVICE="${DEVICE:-cuda}"
 OPPONENT_POOL="${OPPONENT_POOL:-self,heuristic,dummy,previous}"
-ROLLOUT_WORKERS="${ROLLOUT_WORKERS:-1}"
+# Opponent-pool training expands each seed into multiple rollout jobs; run several jobs concurrently by default.
+ROLLOUT_WORKERS="${ROLLOUT_WORKERS:-8}"
 REWARD_SHAPING_START="${REWARD_SHAPING_START:-0.02}"
 REWARD_SHAPING_END="${REWARD_SHAPING_END:-0.0}"
 EVAL_SEED_COUNT="${EVAL_SEED_COUNT:-4}"
