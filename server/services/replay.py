@@ -197,7 +197,14 @@ def _apply_cards_played(state: MatchState, event: Event) -> MatchState:
     played_hand = parse_hand(resolve_cards(card_ids), event.payload["hand_type"], level=state.current_level)
     trick = replace(state.deal.current_trick, last_play=played_hand, last_play_seat=seat, pass_count=0)
     turn = next_seat(seat, active) if active else seat
-    deal = replace(state.deal, hands=hands, active_seats=frozenset(active), turn=turn, current_trick=trick)
+    deal = replace(
+        state.deal,
+        hands=hands,
+        active_seats=frozenset(active),
+        turn=turn,
+        current_trick=trick,
+        played_card_ids=(*state.deal.played_card_ids, *card_ids),
+    )
     return replace(state, deal=deal)
 
 

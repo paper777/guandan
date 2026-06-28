@@ -38,6 +38,7 @@ class DealState:
     current_trick: TrickState
     tribute: TributeState | None = None
     report_10_done: frozenset[Seat] = field(default_factory=frozenset)
+    played_card_ids: tuple[str, ...] = ()
 
     def hand_for(self, seat: Seat) -> tuple[str, ...]:
         return self.hands.get(seat, ())

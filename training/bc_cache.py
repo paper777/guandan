@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from training.collect import BcSample, iter_jsonl
+from training.encode import ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION, encoding_schema
 from training.model import require_torch
 
 
@@ -121,6 +122,7 @@ def build_tensor_cache(
         "action_dim": action_dim,
         "observation_names": list(observation_names),
         "action_names": list(action_names),
+        "encoding_schema": _known_encoding_schema(observation_names, action_names, observation_dim, action_dim),
         "legal_action_vocab": legal_action_vocab,
         "chosen_kind_vocab": chosen_kind_vocab,
         "candidate_count_vocab": candidate_count_vocab,
@@ -290,6 +292,24 @@ def _sample_action_dim(sample: BcSample) -> int:
     if sample.candidate_values:
         return len(sample.candidate_values[0])
     raise ValueError("sample has no action features")
+
+
+def _known_encoding_schema(
+    observation_names: tuple[str, ...],
+    action_names: tuple[str, ...],
+    observation_dim: int,
+    action_dim: int,
+) -> dict[str, object] | None:
+    for version in (ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION):
+        schema = encoding_schema(version)
+        schema_observation_names = tuple(str(name) for name in schema["observation_names"])
+        schema_action_names = tuple(str(name) for name in schema["action_names"])
+        if observation_names and action_names:
+            if observation_names == schema_observation_names and action_names == schema_action_names:
+                return schema
+        elif len(schema_observation_names) == observation_dim and len(schema_action_names) == action_dim:
+            return schema
+    return None
 
 
 def _validate_sample_dimensions(sample: BcSample, observation_dim: int, action_dim: int, index: int) -> None:

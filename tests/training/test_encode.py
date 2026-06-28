@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from server.domain.seats import Seat
-from training.encode import CARD_FACES, encode_action, encode_observation
+from training.encode import CARD_FACES, encode_action, encode_observation, encoding_schema
 from training.env import GuandanTrainingEnv
 
 
@@ -18,7 +18,18 @@ class EncodingTests(unittest.TestCase):
         self.assertEqual(len(encoded.names), len(encoded.values))
         self.assertIn("seat/E", encoded.names)
         self.assertIn("hand_face/S-3", encoded.names)
+        self.assertIn("played_face/S-3", encoded.names)
+        self.assertIn("trick_pass_count", encoded.names)
         self.assertEqual(len([name for name in encoded.names if name.startswith("hand_face/")]), len(CARD_FACES))
+
+    def test_encoding_schema_hash_changes_between_legacy_and_current_features(self) -> None:
+        legacy = encoding_schema("v1")
+        current = encoding_schema("v2")
+
+        self.assertNotEqual(legacy["hash"], current["hash"])
+        self.assertNotIn("played_face/S-3", legacy["observation_names"])
+        self.assertIn("played_face/S-3", current["observation_names"])
+        self.assertIn("action_beats_opponent", current["action_names"])
 
     def test_observation_encoding_does_not_depend_on_opponent_card_identities(self) -> None:
         env = GuandanTrainingEnv()
@@ -43,6 +54,8 @@ class EncodingTests(unittest.TestCase):
 
         self.assertEqual(encoded["action_length"], action.length / 8.0)
         self.assertEqual(encoded["remaining_after_action"], (len(snapshot.hand) - len(action.card_ids)) / 27.0)
+        self.assertIn("action_finishes_hand", encoded)
+        self.assertIn("action_rank_margin", encoded)
 
 
 if __name__ == "__main__":

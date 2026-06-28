@@ -6,7 +6,7 @@ from pathlib import Path
 
 from server.domain.legal_actions import ActionCandidate
 from server.services.snapshots import SeatSnapshot
-from training.encode import encode_action, encode_observation
+from training.encode import encode_action, encode_observation, validate_encoding_schema
 
 
 DEFAULT_MODEL_PATH = Path("data/models/ppo_actor_critic.pt")
@@ -76,14 +76,15 @@ class _LoadedModel:
     observation_dim: int
     action_dim: int
     kind: str
+    schema_version: str
 
     def choose_action(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...]) -> ActionCandidate | None:
-        observation = encode_observation(snapshot).values
+        observation = encode_observation(snapshot, schema_version=self.schema_version).values
         if len(observation) != self.observation_dim:
             raise ValueError(
                 f"observation_dim mismatch: checkpoint={self.observation_dim} runtime={len(observation)}"
             )
-        action_values = [encode_action(action, snapshot).values for action in actions]
+        action_values = [encode_action(action, snapshot, schema_version=self.schema_version).values for action in actions]
         if any(len(values) != self.action_dim for values in action_values):
             raise ValueError(f"action_dim mismatch: checkpoint={self.action_dim}")
         torch = self.torch
@@ -108,6 +109,7 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
     checkpoint = torch.load(path, map_location=device)
     if not isinstance(checkpoint, dict):
         raise ValueError("checkpoint must be a dictionary")
+    schema_version = validate_encoding_schema(checkpoint)
     observation_dim = int(checkpoint["observation_dim"])
     action_dim = int(checkpoint["action_dim"])
     hidden_dim = int(checkpoint.get("hidden_dim", 256))
@@ -136,4 +138,4 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
     else:
         raise ValueError("checkpoint model_state is neither PPO actor-critic nor BC ranker")
     model.eval()
-    return _LoadedModel(torch, model, device, observation_dim, action_dim, kind)
+    return _LoadedModel(torch, model, device, observation_dim, action_dim, kind, schema_version)

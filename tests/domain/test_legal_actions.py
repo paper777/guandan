@@ -6,7 +6,12 @@ from server.domain.cards import CARD_BY_ID, Rank
 from server.domain.commands import Pass
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.hand_types import HandType, parse_hand
-from server.domain.legal_actions import ActionCandidate, legal_actions_for_snapshot, legal_actions_for_state
+from server.domain.legal_actions import (
+    ActionCandidate,
+    candidate_generation_cache_info,
+    legal_actions_for_snapshot,
+    legal_actions_for_state,
+)
 from server.domain.reducer import reduce_command
 from server.domain.seats import SEATS, Seat
 from server.domain.state import DealState, MatchPhase, MatchState, TributeObligation, TributeState, TrickState
@@ -201,6 +206,16 @@ class LegalActionTests(unittest.TestCase):
         state = make_state(turn=Seat.EAST)
 
         self.assertEqual(legal_actions_for_state(state, Seat.SOUTH), ())
+
+    def test_candidate_generation_reuses_cached_card_groups(self) -> None:
+        state = make_state(hands={Seat.EAST: ("D1-S-3", "D1-H-3", "D1-S-4", "D1-H-4", "D1-S-5")})
+
+        legal_actions_for_state(state, Seat.EAST)
+        before = candidate_generation_cache_info()
+        legal_actions_for_state(state, Seat.EAST)
+        after = candidate_generation_cache_info()
+
+        self.assertGreater(after["hits"], before["hits"])
 
     def test_snapshot_play_or_pass_uses_public_trick_and_private_hand(self) -> None:
         current = parse_hand(cards("D1-S-A"))

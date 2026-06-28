@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
-from server.domain.commands import JoinTable, Ready, StartMatch
+from server.domain.commands import JoinTable, Pass, PlayCards, Ready, StartMatch
 from server.domain.controllers import ControllerCapability, ControllerKind, ControllerRef, PlayerKind, PlayerRef
 from server.domain.reducer import reduce_command
 from server.domain.seats import SEATS, Seat
@@ -50,6 +50,27 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.hand_counts[Seat.EAST], 27)
         self.assertEqual(snapshot.level_by_team, state.scores.level_by_team)
         self.assertFalse(hasattr(snapshot, "hands"))
+
+    def test_public_snapshot_exposes_played_counts_and_pass_count(self) -> None:
+        state = make_state()
+        assert state.deal is not None
+        card_id = state.deal.hand_for(Seat.EAST)[0]
+        result = reduce_command(state, PlayCards("c-E", Seat.EAST, (card_id,)))
+        self.assertIsNone(result.rejection)
+        state = result.state
+
+        snapshot = public_snapshot(state)
+        self.assertEqual(snapshot.played_card_counts[_face(card_id)], 1)
+        self.assertEqual((snapshot.current_trick or {}).get("pass_count"), 0)
+
+        assert state.deal is not None
+        passing_seat = state.deal.turn
+        assert passing_seat is not None
+        result = reduce_command(state, Pass(f"c-{passing_seat.value}", passing_seat))
+        self.assertIsNone(result.rejection)
+        snapshot = public_snapshot(result.state)
+
+        self.assertEqual((snapshot.current_trick or {}).get("pass_count"), 1)
 
     def test_seat_snapshot_exposes_only_attached_seat_hand(self) -> None:
         state = make_state()
@@ -164,6 +185,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.legal_action, "return_tribute")
         self.assertEqual(snapshot.eligible_card_ids, ("D1-S-10", "D1-S-9"))
         self.assertFalse(snapshot.return_rank_at_most_ten)
+
+
+def _face(card_id: str) -> str:
+    parts = card_id.split("-")
+    if len(parts) == 2:
+        return parts[1]
+    return f"{parts[1]}-{parts[2]}"
 
 
 if __name__ == "__main__":

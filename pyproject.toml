@@ -20,6 +20,7 @@ guandan-bc-collect = "training.collect:main"
 guandan-bc-cache = "training.bc_cache:main"
 guandan-bc-train = "training.bc_train:main"
 guandan-ppo-train = "training.ppo_train:main"
+guandan-eval-gate = "training.eval_gate:main"
 guandan-rl-agent-server = "npc.rl_agent.server:main"
 
 [project.optional-dependencies]

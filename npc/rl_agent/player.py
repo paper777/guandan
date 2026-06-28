@@ -107,6 +107,7 @@ def _public_snapshot(
         action_timeout_seconds=int(public_payload.get("action_timeout_seconds") or DEFAULT_ACTION_TIMEOUT_SECONDS),
         acting_seat=_optional_seat(public_payload.get("acting_seat")),
         current_trick=_dict(prompt.get("current_trick") or public_payload.get("current_trick")) or None,
+        played_card_counts=_played_card_counts(public_payload.get("played_card_counts")),
     )
 
 
@@ -197,6 +198,17 @@ def _hand_counts(value: object, own_seat: Seat, own_hand: object) -> dict[Seat, 
             if seat is not None:
                 counts[seat] = int(raw_count or 0)
     counts[own_seat] = counts.get(own_seat) or len(_list(own_hand))
+    return counts
+
+
+def _played_card_counts(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for raw_face, raw_count in value.items():
+        face = str(raw_face)
+        if face:
+            counts[face] = int(raw_count or 0)
     return counts
 
 

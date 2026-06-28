@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations
 from typing import Iterable, Literal, TYPE_CHECKING
 
@@ -135,6 +136,14 @@ def _play_actions(
 
 
 def _candidate_card_groups(hand: tuple[str, ...], level: Rank) -> tuple[tuple[tuple[str, ...], HandType], ...]:
+    return _candidate_card_groups_cached(hand, level)
+
+
+@lru_cache(maxsize=8192)
+def _candidate_card_groups_cached(
+    hand: tuple[str, ...],
+    level: Rank,
+) -> tuple[tuple[tuple[str, ...], HandType], ...]:
     groups: list[tuple[tuple[str, ...], HandType]] = []
     by_rank = _cards_by_rank(hand)
     wilds = tuple(card_id for card_id in hand if is_red_heart_level_card(CARD_BY_ID[card_id], level))
@@ -154,6 +163,16 @@ def _candidate_card_groups(hand: tuple[str, ...], level: Rank) -> tuple[tuple[tu
     for card_ids, hand_type in groups:
         deduped[(card_ids, hand_type)] = (card_ids, hand_type)
     return tuple(deduped.values())
+
+
+def candidate_generation_cache_info() -> dict[str, int]:
+    info = _candidate_card_groups_cached.cache_info()
+    return {
+        "hits": info.hits,
+        "misses": info.misses,
+        "maxsize": info.maxsize,
+        "currsize": info.currsize,
+    }
 
 
 def _single_groups(hand: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:

@@ -51,6 +51,7 @@ The current training pipeline includes:
 - behavior-cloning sample collection: `training/collect.py`
 - behavior-cloning trainer: `training/bc_train.py`
 - self-play rollout and PPO scaffold: `training/rollout.py`, `training/ppo_train.py`
+- checkpoint evaluation gate: `training/eval_gate.py`
 - runtime RL NPC player: `npc/rl_agent/player.py`
 
 Install/use the training extra through `uv run --extra train ...`. Verify GPU availability first:
@@ -78,10 +79,16 @@ Train the behavior-cloning candidate ranker on CUDA:
 uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --device cuda
 ```
 
-Run a PPO self-play fine-tuning run on CUDA:
+Run a PPO self-play continuation run on CUDA:
 
 ```bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --device cuda
+uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --device cuda
+```
+
+Evaluate a checkpoint against fixed dummy, heuristic, and previous-model gates:
+
+```bash
+uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --previous-checkpoint data/models/ppo_actor_critic.pt --seed-count 4 --max-deals 1 --device cuda
 ```
 
 Run the learned NPC policy server, with heuristic fallback when the checkpoint is unavailable:

@@ -7,7 +7,7 @@ from server.domain.legal_actions import ActionCandidate
 from server.domain.seats import SEATS, Seat
 from server.domain.state import MatchPhase
 from server.services.snapshots import SeatSnapshot
-from training.encode import encode_action, encode_observation
+from training.encode import ENCODING_SCHEMA_VERSION, encode_action, encode_observation
 from training.env import GuandanTrainingEnv
 from training.heuristic import HeuristicPolicy
 
@@ -102,7 +102,10 @@ def collect_rollout(
         snapshot = env.observe(actor)
         actions = env.legal_actions(actor)
         decision = policies[actor].choose_decision(snapshot, actions)
-        transitions.append(_transition_from_decision(seed_label, snapshot, actions, decision))
+        schema_version = str(getattr(policies[actor], "schema_version", ENCODING_SCHEMA_VERSION))
+        transitions.append(
+            _transition_from_decision(seed_label, snapshot, actions, decision, schema_version=schema_version)
+        )
         latest_by_seat[actor] = len(transitions) - 1
 
         step = env.step(actor, decision.action)
@@ -152,9 +155,11 @@ def _transition_from_decision(
     snapshot: SeatSnapshot,
     actions: tuple[ActionCandidate, ...],
     decision: RolloutDecision,
+    *,
+    schema_version: str = ENCODING_SCHEMA_VERSION,
 ) -> RolloutTransition:
-    observation = encode_observation(snapshot)
-    action_vectors = tuple(encode_action(action, snapshot) for action in actions)
+    observation = encode_observation(snapshot, schema_version=schema_version)
+    action_vectors = tuple(encode_action(action, snapshot, schema_version=schema_version) for action in actions)
     action_names = action_vectors[0].names if action_vectors else ()
     return RolloutTransition(
         seed=seed,

@@ -7,6 +7,7 @@ from training.ppo_train import (
     _format_stop_counts,
     _gae_returns_and_advantages,
     _initial_dimensions,
+    _initial_model_state_from_checkpoint,
     _iter_batches,
     _parser,
     _policy_state_from_bc_checkpoint,
@@ -94,6 +95,11 @@ class PpoScaffoldTests(unittest.TestCase):
 
         self.assertEqual(args.init_policy, "bc.pt")
 
+    def test_parser_accepts_trained_model_initialization_alias(self) -> None:
+        args = _parser().parse_args(["model.pt", "--init-model", "ppo.pt"])
+
+        self.assertEqual(args.init_policy, "ppo.pt")
+
     def test_gae_returns_and_advantages_follow_seat_trajectory(self) -> None:
         transitions = (
             _transition("E", reward=0.0, value=0.2),
@@ -145,6 +151,40 @@ class PpoScaffoldTests(unittest.TestCase):
         policy_state = _policy_state_from_bc_checkpoint(checkpoint, 3, 2, 4)
 
         self.assertEqual(policy_state, {"0.weight": "w0", "0.bias": "b0"})
+
+    def test_initial_checkpoint_state_accepts_trained_ppo_actor_critic(self) -> None:
+        checkpoint = {
+            "observation_dim": 3,
+            "action_dim": 2,
+            "hidden_dim": 4,
+            "model_state": {
+                "policy_net.0.weight": "pw0",
+                "policy_net.0.bias": "pb0",
+                "value_net.0.weight": "vw0",
+                "value_net.0.bias": "vb0",
+            },
+        }
+
+        kind, model_state = _initial_model_state_from_checkpoint(checkpoint, 3, 2, 4)
+
+        self.assertEqual(kind, "ppo")
+        self.assertEqual(model_state, checkpoint["model_state"])
+
+    def test_initial_checkpoint_state_maps_bc_ranker_for_bootstrap(self) -> None:
+        checkpoint = {
+            "observation_dim": 3,
+            "action_dim": 2,
+            "hidden_dim": 4,
+            "model_state": {
+                "net.0.weight": "w0",
+                "net.0.bias": "b0",
+            },
+        }
+
+        kind, model_state = _initial_model_state_from_checkpoint(checkpoint, 3, 2, 4)
+
+        self.assertEqual(kind, "bc")
+        self.assertEqual(model_state, {"0.weight": "w0", "0.bias": "b0"})
 
     def test_bc_checkpoint_policy_state_rejects_dimension_mismatch(self) -> None:
         checkpoint = {

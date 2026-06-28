@@ -148,7 +148,7 @@ npc/rl_agent/
 推荐算法：
 
 - 参数共享 actor。
-- actor 从第 4 阶段 BC checkpoint warm start；critic 单独初始化并在 PPO 中学习。
+- 首次 PPO 可从第 4 阶段 BC checkpoint warm start；后续训练必须从已有 PPO actor-critic checkpoint 继续，完整加载 actor 和 critic，避免 RL 迭代重新回到启发式教师策略。
 - centralized critic，可访问完整状态。
 - actor 执行时只看本座可见信息。
 - legal action mask 约束 softmax。
@@ -158,6 +158,7 @@ npc/rl_agent/
 
 - match 胜方 `+1`，负方 `-1`。
 - deal 结束按升级数给中间奖励，例如胜方 `+advance_count / 3`。
+- 终局奖励按开局手牌强度做难度系数调整：大小王、炸弹、高张和更少预估手数代表更强开局牌；强牌赢的奖励略降，弱牌赢的奖励略升。
 - 初期可少量 shaping，例如先走完、双下、拦截成功；后期逐步衰减。
 
 ### 第 6 阶段：线上接入
@@ -226,7 +227,7 @@ value = value_head(h)
 - 已新增 `tests/training/test_collect_bc.py`，验证样本结构、JSONL round trip、采集 CLI 和 BC 维度校验。
 - 已新增 `training/rollout.py`，提供按座位 reward 回填的自博弈 rollout 采集和 discounted return 计算。
 - 已扩展 `training/model.py`，提供候选动作 actor-critic 模型工厂。
-- 已新增 `training/ppo_train.py`，提供惰性 PyTorch self-play PPO 训练入口 `guandan-ppo-train`，支持 BC warm start、GAE、mini-batch PPO 更新、梯度裁剪、KL early stop 和逐 update 日志。
+- 已新增 `training/ppo_train.py`，提供惰性 PyTorch self-play PPO 训练入口 `guandan-ppo-train`，支持首次 BC warm start、从已有 PPO actor-critic checkpoint 继续训练、GAE、mini-batch PPO 更新、梯度裁剪、KL early stop 和逐 update 日志。
 - 已新增 `tests/training/test_rollout_ppo.py`，验证 rollout reward/done 回填、按座位 return/GAE 计算和 PPO 参数解析。
 - 已新增 `npc/rl_agent/player.py` 和 `npc/rl_agent/model_loader.py`，实现现有 `Player.choose_action(ActionRequest)` 协议、本地 snapshot 合法候选动作生成、PPO/BC checkpoint 候选打分和启发式 fallback。
 - 已新增 `npc/rl_agent/server.py` 和命令 `guandan-rl-agent-server`，可作为独立 HTTP policy server 运行。
@@ -240,9 +241,12 @@ value = value_head(h)
 guandan-bc-collect data/bc/heuristic.compact.jsonl.gz --seed-count 8 --max-deals 1 --workers 4 --compact
 guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc/heuristic.bc-cache --shard-size 2048
 guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128
-guandan-ppo-train data/models/ppo_actor_critic.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256
+guandan-ppo-train data/models/ppo_actor_critic.bootstrap.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256
+guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256
 guandan-rl-agent-server --model-path data/models/ppo_actor_critic.pt --device cuda
 ```
+
+`--init-policy` 和 `--init-model` 指向同一个初始化参数：传入 BC ranker checkpoint 时只初始化 PPO actor，传入 PPO actor-critic checkpoint 时完整恢复 actor 和 critic。持续训练建议写入新的 `.next.pt` checkpoint，固定评测通过后再提升为线上 `data/models/ppo_actor_critic.pt`。
 
 `guandan-bc-train`、`guandan-ppo-train` 和 RL agent 模型推理需要安装 PyTorch；当前代码使用惰性导入，所以没有安装训练依赖时仍可运行普通单元测试，RL agent 会 fallback 到启发式策略。
 
@@ -267,7 +271,7 @@ GPU smoke run 记录：
 - `training/encode.py` 将 `SeatSnapshot` 和每个合法候选动作编码为固定长度 float 特征。
 - `training/heuristic.py` 提供确定性启发式教师，供 BC 采样、评测和线上 fallback 复用。
 - `training/collect.py` 生成行为克隆 JSONL/JSONL.GZ 数据集；`training/bc_cache.py` 可将 JSONL 转成 tensor shard cache；`training/bc_train.py` 训练候选动作 ranker。
-- `training/rollout.py` 和 `training/ppo_train.py` 基于当前模型做自博弈 rollout，并用 PPO 更新 actor-critic。
+- `training/rollout.py` 和 `training/ppo_train.py` 基于当前 actor-critic checkpoint 做自博弈 rollout，并用 PPO 更新 actor-critic；启发式策略不参与 PPO 自博弈 actor，只保留为 BC 教师、评测基线和线上 fallback。
 - `npc/rl_agent/` 支持加载 PPO actor-critic 或 BC ranker checkpoint；模型不可用、模型异常或行动 deadline 太近时 fallback 到启发式策略，再失败时 fallback 到 `DummyBotPlayer`。
 
 这条链路的核心优点是规则单一来源明确：动作枚举、训练 step 和线上执行最终都被 reducer 约束，非法动作风险主要集中在 snapshot 重建和候选生成一致性上。
@@ -288,40 +292,40 @@ GPU smoke run 记录：
 
 ### Observation 编码
 
-`encode_observation(snapshot)` 当前输出 `140` 维 float 特征，全部来自当前座位可见的 `SeatSnapshot`：
+`encode_observation(snapshot)` 采用版本化 schema：旧 checkpoint 使用 `v1` 的 `140` 维 float 特征，当前默认 `v2` 输出 `195` 维 float 特征，全部来自当前座位可见的 `SeatSnapshot`：
 
 - 座位、phase、当前级牌、current turn、acting seat、legal action、贡牌来源/目标等 one-hot。
 - 双方等级归一化到 `[0, 1]`。
 - 四家剩余手牌数量，按 `27` 归一化。
 - 四家 finish position，未完成为 `0`。
 - 本座 54 种牌面计数，按双副牌最大计数 `2` 归一化。
-- 当前 trick 的最后出牌座位、牌型、主 rank 和长度。
+- 当前 trick 的最后出牌座位、牌型、主 rank、长度和 pass 数。
+- public 已出牌牌面计数。
 - `return_rank_at_most_ten` 贡牌约束标记。
 
 隐私边界是合理的：编码不读取其他座位私有手牌，测试也覆盖了“替换对手手牌不改变本座 observation 编码”的场景。
 
-当前缺口：
+当前剩余缺口：
 
-- 没有 public 已出牌统计，模型无法直接知道每个 rank/suit 已消耗多少，只能从当前 trick 和剩余牌数间接推断。
-- snapshot 的 public trick 未暴露 `pass_count`，observation 也没有当前轮已经 pass 的人数。
-- 缺少明确的“最后出牌者是同伴/对手”“对手是否只剩 1-2 张”“自己/同伴/对手是否接近走完”等派生特征；模型可以从座位和 hand_counts 间接学习，但样本效率较低。
 - 没有历史 trick 序列或 recurrent state，当前模型是单步静态策略。
+- public 已出牌统计只有按牌面聚合的 count，还没有按 trick 序列建模。
 
 ### Action 编码
 
-`encode_action(action, snapshot)` 当前输出 `88` 维 float 特征：
+`encode_action(action, snapshot)` 同样版本化：旧 checkpoint 使用 `v1` 的 `88` 维特征，当前默认 `v2` 输出 `96` 维特征：
 
 - 动作类型 one-hot：`pass`、`play_cards`、`submit_tribute`、`return_tribute`。
 - 出牌牌型 one-hot、主 rank one-hot。
 - 候选动作 54 种牌面计数，按 `2` 归一化。
 - 动作长度、是否有 declared type、是否炸弹类、是否使用红心级牌。
 - 出完该动作后本座剩余牌数。
+- 是否压同伴、是否压对手、是否能直接走完、对手危险位、相对当前 trick 的 rank margin。
+- 是否拆掉炸弹、顺子或连对结构。
 
-当前编码能表达“这手牌是什么”和“打完还剩多少”，但缺少上下文派生特征：
+当前编码能表达“这手牌是什么”“打完还剩多少”和一组轻量上下文派生特征。剩余缺口：
 
-- 是否压同伴、是否压对手、是否能直接走完、是否拆掉炸弹或关键牌组。
-- 候选动作相对当前 trick 的增量强度，例如只大一点还是高很多。
-- 候选动作在剩余手牌中的结构代价，例如是否破坏顺子、连对、三带等潜在组合。
+- 结构代价仍是粗粒度二值标记，没有估算完整最少手数或最佳拆牌路径。
+- rank margin 只表达主 rank 差距，没有完整比较炸弹长度、同花顺、四王等高阶强度关系。
 
 这些派生特征不改变规则正确性，但会显著降低小模型从稀疏样本中学习协作和拆牌策略的难度。
 
@@ -332,8 +336,8 @@ GPU smoke run 记录：
 BC ranker：
 
 ```text
-pair_features = concat(observation[140], action[88])  # 228 dims
-MLP(228 -> hidden -> hidden -> 1)
+pair_features = concat(observation, action)  # v1: 140+88, v2: 195+96
+MLP(pair_dim -> hidden -> hidden -> 1)
 softmax(score over legal candidates)
 CrossEntropy(chosen_index)
 ```
@@ -345,7 +349,7 @@ policy_net: MLP(pair_features -> hidden -> hidden -> 1)
 value_net:  MLP(observation -> hidden -> hidden -> 1)
 ```
 
-默认 `hidden_dim=256` 时，BC ranker 约 `125k` 参数，PPO actor-critic 约 `227k` 参数。这个规模非常适合低延迟 smoke run 和线上 fallback 验证，但明显小于最初建议的 5M 到 30M 参数区间，表达能力可能不足以稳定学会复杂拆牌、控牌、让牌和进贡策略。
+默认 `hidden_dim=256` 时，模型规模仍是轻量级 MLP。这个规模非常适合低延迟 smoke run 和线上 fallback 验证，但明显小于最初建议的 5M 到 30M 参数区间，表达能力可能不足以稳定学会复杂拆牌、控牌、让牌和进贡策略。
 
 当前实现与初始设计的差异：
 
@@ -384,11 +388,17 @@ BC 训练流程：
 PPO 当前流程：
 
 1. 用 `_initial_dimensions()` 从训练环境首个合法决策推导 observation/action 维度。
-2. 可用 BC checkpoint 初始化 `policy_net`，并校验 observation/action/hidden 维度。
+2. 可用 BC checkpoint 初始化 `policy_net`，或用已有 PPO actor-critic checkpoint 完整恢复 `policy_net` 和 `value_net`，并校验 observation/action/hidden 维度。
 3. 每个 update 对每个 rollout seed 做一局或多局自博弈，四个座位共享同一个 `TorchRolloutPolicy`。
 4. rollout 记录 observation、候选动作、采样动作 index、old log prob、value、reward 和 done。
-5. reward 在 deal/match 结束时回填到每个座位最近一次 transition，再按 seat 反向计算 GAE。
+5. reward 在 deal/match 结束时结合开局手牌强度系数回填到每个座位最近一次 transition，再按 seat 反向计算 GAE。
 6. PPO loss 使用 clipped policy loss、MSE value loss、entropy bonus、gradient clipping 和 target KL early stop。
+
+PPO 初始化约束（2026-06-27）：
+
+- `HeuristicPolicy` 只用于 BC 采样、固定评测和线上安全 fallback；PPO rollout actor 必须来自 `TorchRolloutPolicy` 包装的模型。
+- `--init-policy` 保持向后兼容，可接收 BC ranker 或 PPO actor-critic checkpoint；新增同义参数 `--init-model`，用于表达从已训练 PPO 模型继续训练。
+- BC ranker checkpoint 只把 `net.*` 映射到 `policy_net.*`，critic 仍在 PPO 中学习；PPO checkpoint 则完整加载 actor 和 critic，使持续训练基于已训练模型而不是重新依赖启发式教师。
 
 当前 PPO 是可运行 scaffold，但还不是高吞吐或强评测版本：
 
@@ -396,7 +406,7 @@ PPO 当前流程：
 - 没有 opponent pool，容易产生同策略自博弈的过拟合和循环策略。
 - critic 只看 actor observation，优势估计信息少；如果训练中允许 critic 看全状态，可以加 centralized critic 提升稳定性。
 - reward 主要是局末/比赛末稀疏奖励，早期 PPO 对 BC 初始化质量依赖较强。
-- 没有固定评测门禁，训练输出 checkpoint 前未自动跑 vs heuristic、vs dummy、vs previous model 的胜率评估。
+- 已有固定评测门禁入口和脚本集成，但当前默认 seed/deal 数较小，只适合作为训练产物 smoke gate；正式模型晋级还需要更大 seed 池和统计阈值。
 
 ### 线上推理接入
 
@@ -418,7 +428,7 @@ PPO 当前流程：
 - 编码维度稳定性和 opponent private hand 隐私。
 - 启发式协作行为和一局评测无拒绝。
 - BC 样本结构、compact JSONL round trip、并行采集、seed validation split、tensor cache、batch 训练。
-- rollout reward/done 回填、per-seat returns/GAE、PPO 参数解析、BC warm start 参数映射。
+- rollout reward/done 回填、per-seat returns/GAE、PPO 参数解析、BC warm start 参数映射和已有 PPO checkpoint 继续训练参数映射。
 - RL agent fallback、模型候选选择和 ActionRequest 到 SeatSnapshot 的转换。
 
 建议补充的测试：
@@ -442,3 +452,93 @@ PPO 当前流程：
 8. 增加 opponent pool。PPO rollout 混合当前模型、历史 checkpoint、启发式和 dummy，避免同策略自博弈过拟合。
 9. 提升 rollout 吞吐。按 seed 并行收集 rollout，或者先做多进程环境采样再集中 PPO update；同时统计 reducer step/s、candidate/s、GPU utilization。
 10. 分阶段放大奖励设计。保留最终胜负和升级奖励为主，先增加小权重 shaping（终结出完、拦截危险对手、同伴领先时 pass、保留炸弹），后续随 PPO 稳定后衰减，避免模型只学局部启发式。
+
+## 优化建议前五条执行设计与进度（2026-06-28）
+
+本轮只执行上面优化建议的前五条，目标是先提高训练产物可验收性、checkpoint 兼容性、线上输入信息量和候选生成稳定性，不提前改动模型结构。
+
+### 1. 训练评测门禁
+
+设计：
+
+- 新增固定 seed 的 checkpoint 评测入口，候选 checkpoint 作为 candidate team，轮换东西/南北两队，避免座位偏置。
+- 固定对手至少包含 `dummy` 和 `HeuristicPolicy`；当传入 previous checkpoint 时，再加入 `previous` 对手。
+- 输出机器可读 JSON，记录胜率、平均升级数、双下率、pass 率、炸弹使用率、非法动作率和停止原因。
+- BC/PPO 脚本训练完成后默认运行小规模评测；大规模训练可通过 `EVAL_SEED_COUNT=0` 关闭门禁。
+
+已执行：
+
+- 新增 `training/eval_gate.py` 和命令 `guandan-eval-gate`。
+- `scripts/bc_train.sh` 在 BC checkpoint 输出后自动评测 vs dummy/heuristic。
+- `scripts/ppo_train.sh` 继续从 `data/models/ppo_actor_critic.pt` 训练到 `.next.pt` 后，自动评测 vs dummy/heuristic/previous checkpoint。
+- 新增 `tests/training/test_eval_gate.py` 覆盖评测摘要生成。
+
+命令：
+
+```bash
+uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --previous-checkpoint data/models/ppo_actor_critic.pt --seed-count 4 --max-deals 1 --device cuda
+```
+
+### 2. 编码 schema manifest
+
+设计：
+
+- 编码 schema 明确版本化：旧 140/88 维为 `v1`，新增 public 统计和动作上下文后为 `v2`。
+- schema manifest 包含 observation/action feature names、归一化规则和 hash。
+- BC cache、BC checkpoint、PPO checkpoint 都保存 `encoding_schema`。
+- checkpoint 加载时优先按 schema hash 校验；旧 checkpoint 没有 manifest 时按维度推断 `v1`/`v2`，保证现有 `data/models/ppo_actor_critic.pt` 可以继续训练。
+
+已执行：
+
+- `training/encode.py` 新增 `encoding_schema()`、`validate_encoding_schema()`、`ENCODING_SCHEMA_VERSION` 和 legacy 兼容。
+- `training/bc_cache.py`、`training/bc_train.py` 写入 schema manifest。
+- `training/ppo_train.py`、`training/rollout.py` 和 `npc/rl_agent/model_loader.py` 按 checkpoint schema 编码，避免用 v2 runtime 静默加载 v1 模型。
+- 新增/更新编码测试，覆盖 v1/v2 hash 差异和新增特征名。
+
+### 3. 候选生成长尾优化
+
+设计：
+
+- 先做低风险缓存和可观测性，不引入会改变策略空间的剪枝。
+- 缓存 `_candidate_card_groups(hand, level)` 的纯组合枚举结果；后续仍由当前 trick 的 `parse_hand()`/`can_beat()` 过滤，规则正确性不变。
+- 暴露 cache hit/miss/currsize，供后续 benchmark 和 p95 调优使用。
+- 暂不做候选上限或启发式剪枝，避免改变 BC/PPO 的合法候选集合；剪枝留到第 6 条模型升级后以两阶段 ranker 方式评估。
+
+已执行：
+
+- `server/domain/legal_actions.py` 对候选牌组组合加 `lru_cache(maxsize=8192)`。
+- cache key 保留原始 hand tuple，避免改变候选 `card_ids` 顺序和既有样本 payload。
+- 新增 `candidate_generation_cache_info()`。
+- `tests/domain/test_legal_actions.py` 覆盖重复生成时 cache hit 增长，并继续验证 reducer 接受候选。
+
+### 4. Public 已出牌统计和 `pass_count`
+
+设计：
+
+- reducer 在 `DealState` 保存已打出的 public card ids。
+- public snapshot 只暴露按牌面聚合后的已出牌计数，不暴露任何未公开私有手牌。
+- current trick snapshot 增加 `pass_count`，用于区分当前轮已有几家放弃压制。
+- observation v2 将 54 个 public played face counts 和 `trick_pass_count` 加入模型输入。
+
+已执行：
+
+- `server/domain/state.py` 的 `DealState` 增加 `played_card_ids`。
+- `server/domain/reducer.py` 在成功 `PlayCards` 时追加已出牌 ids。
+- `server/services/snapshots.py` 的 `PublicTableSnapshot` 增加 `played_card_counts`，`current_trick` 增加 `pass_count`。
+- `training/encode.py` 在 v2 observation 中加入 `played_face/*` 和 `trick_pass_count`。
+- `tests/services/test_snapshots.py` 覆盖出牌计数和 pass_count；编码隐私测试继续保证修改对手私有手牌不会影响本座 observation。
+
+### 5. 动作上下文派生特征
+
+设计：
+
+- 不改变 action candidate 本身，只在 v2 action encoding 中加入上下文派生特征。
+- 优先表达协作和拆牌成本：是否压同伴、是否压对手、是否一手走完、对手是否危险位、相对当前 trick 的 rank margin、是否拆炸弹/顺子/连对。
+- 这些特征全部从 `SeatSnapshot` 和本座手牌计算，保持线上推理隐私边界。
+
+已执行：
+
+- `training/encode.py` 的 v2 action features 增加：
+  `action_beats_partner`、`action_beats_opponent`、`action_finishes_hand`、`action_opponent_danger`、`action_rank_margin`、`action_breaks_bomb`、`action_breaks_sequence`、`action_breaks_pair_run`。
+- BC/PPO/线上模型加载路径统一按 checkpoint schema 选择 v1 或 v2 编码。
+- `tests/training/test_encode.py` 覆盖新增 action feature names 和字段存在性。

@@ -9,7 +9,7 @@ from pathlib import Path
 from server.domain.legal_actions import ActionCandidate
 from server.domain.seats import SEATS
 from server.services.snapshots import SeatSnapshot
-from training.encode import encode_action, encode_observation
+from training.encode import ENCODING_SCHEMA_VERSION, encode_action, encode_observation, encoding_schema, validate_encoding_schema
 from training.model import build_candidate_actor_critic, pair_feature_dim, require_torch
 from training.rollout import RolloutDecision, RolloutResult, RolloutTransition, collect_rollout
 
@@ -47,6 +47,7 @@ class PpoSummary:
     final_loss: float
     output_path: Path
     init_policy_path: Path | None = None
+    init_checkpoint_kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +62,17 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
     torch.manual_seed(config.seed)
     random.seed(config.seed)
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    observation_dim, action_dim = _initial_dimensions(config.rollout_seeds[0])
+    schema_version = _schema_version_for_training(torch, config.init_policy_path, device)
+    observation_dim, action_dim = _initial_dimensions(config.rollout_seeds[0], schema_version=schema_version)
     model = build_candidate_actor_critic(
         pair_feature_dim(observation_dim, action_dim),
         observation_dim,
         hidden_dim=config.hidden_dim,
         dropout=config.dropout,
     ).to(device)
+    init_checkpoint_kind: str | None = None
     if config.init_policy_path is not None:
-        _initialize_policy_from_bc_checkpoint(
+        init_checkpoint_kind = _initialize_model_from_checkpoint(
             torch,
             model,
             config.init_policy_path,
@@ -77,12 +80,17 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             action_dim,
             config.hidden_dim,
             device,
+            schema_version,
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     final_loss = 0.0
     total_transitions = 0
     if config.log_updates:
-        init_note = f" init_policy={config.init_policy_path}" if config.init_policy_path else ""
+        init_note = (
+            f" init_checkpoint={config.init_policy_path} kind={init_checkpoint_kind}"
+            if config.init_policy_path
+            else ""
+        )
         print(
             f"ppo config device={device} seeds={len(config.rollout_seeds)} updates={config.updates} "
             f"epochs_per_update={config.epochs_per_update} max_deals={config.max_deals_per_seed} "
@@ -95,7 +103,7 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
     for update_index in range(config.updates):
         update_started_at = time.perf_counter()
         rollout_started_at = update_started_at
-        policy = TorchRolloutPolicy(torch, model, device)
+        policy = TorchRolloutPolicy(torch, model, device, schema_version)
         transitions: list[RolloutTransition] = []
         rollouts: list[RolloutResult] = []
         for seed in config.rollout_seeds:
@@ -191,6 +199,7 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             "model_state": model.state_dict(),
             "observation_dim": observation_dim,
             "action_dim": action_dim,
+            "encoding_schema": encoding_schema(schema_version),
             "hidden_dim": config.hidden_dim,
             "dropout": config.dropout,
             "updates": config.updates,
@@ -207,24 +216,40 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             "target_kl": config.target_kl,
             "normalize_advantages": config.normalize_advantages,
             "init_policy_path": str(config.init_policy_path) if config.init_policy_path else None,
+            "init_checkpoint_kind": init_checkpoint_kind,
         },
         config.output_path,
     )
-    return PpoSummary(config.updates, total_transitions, final_loss, config.output_path, config.init_policy_path)
+    return PpoSummary(
+        config.updates,
+        total_transitions,
+        final_loss,
+        config.output_path,
+        config.init_policy_path,
+        init_checkpoint_kind,
+    )
 
 
 class TorchRolloutPolicy:
-    def __init__(self, torch, model, device) -> None:
+    def __init__(self, torch, model, device, schema_version: str = ENCODING_SCHEMA_VERSION) -> None:
         self.torch = torch
         self.model = model
         self.device = device
+        self.schema_version = schema_version
 
     def choose_decision(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...]) -> RolloutDecision:
         was_training = self.model.training
         self.model.eval()
         try:
             with self.torch.no_grad():
-                logits, value = _policy_logits_and_value(self.torch, self.model, snapshot, actions, self.device)
+                logits, value = _policy_logits_and_value(
+                    self.torch,
+                    self.model,
+                    snapshot,
+                    actions,
+                    self.device,
+                    self.schema_version,
+                )
                 distribution = self.torch.distributions.Categorical(logits=logits)
                 index = int(distribution.sample().item())
                 log_prob = float(distribution.log_prob(self.torch.tensor(index, device=self.device)).detach().cpu())
@@ -268,7 +293,11 @@ def main(argv: list[str] | None = None) -> int:
             log_updates=not args.quiet,
         )
     )
-    init_note = f" init_policy={summary.init_policy_path}" if summary.init_policy_path else ""
+    init_note = (
+        f" init_checkpoint={summary.init_policy_path} kind={summary.init_checkpoint_kind}"
+        if summary.init_policy_path
+        else ""
+    )
     print(
         f"ppo updates={summary.updates} transitions={summary.transitions} "
         f"loss={summary.final_loss:.4f}{init_note}; wrote {summary.output_path}",
@@ -277,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _initialize_policy_from_bc_checkpoint(
+def _initialize_model_from_checkpoint(
     torch,
     model,
     checkpoint_path: Path,
@@ -285,10 +314,21 @@ def _initialize_policy_from_bc_checkpoint(
     action_dim: int,
     hidden_dim: int,
     device,
-) -> None:
+    schema_version: str,
+) -> str:
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    policy_state = _policy_state_from_bc_checkpoint(checkpoint, observation_dim, action_dim, hidden_dim)
-    model.policy_net.load_state_dict(policy_state)
+    kind, model_state = _initial_model_state_from_checkpoint(
+        checkpoint,
+        observation_dim,
+        action_dim,
+        hidden_dim,
+        schema_version=schema_version,
+    )
+    if kind == "ppo":
+        model.load_state_dict(model_state)
+    else:
+        model.policy_net.load_state_dict(model_state)
+    return kind
 
 
 def _policy_state_from_bc_checkpoint(
@@ -297,28 +337,55 @@ def _policy_state_from_bc_checkpoint(
     action_dim: int,
     hidden_dim: int,
 ) -> dict[str, object]:
+    kind, model_state = _initial_model_state_from_checkpoint(
+        checkpoint,
+        observation_dim,
+        action_dim,
+        hidden_dim,
+        schema_version=ENCODING_SCHEMA_VERSION,
+    )
+    if kind != "bc":
+        raise ValueError("checkpoint is not a BC ranker checkpoint")
+    return model_state
+
+
+def _initial_model_state_from_checkpoint(
+    checkpoint: object,
+    observation_dim: int,
+    action_dim: int,
+    hidden_dim: int,
+    *,
+    schema_version: str | None = None,
+) -> tuple[str, dict[str, object]]:
     if not isinstance(checkpoint, dict):
-        raise ValueError("BC checkpoint must be a dictionary")
+        raise ValueError("initial checkpoint must be a dictionary")
     _validate_checkpoint_dim(checkpoint, "observation_dim", observation_dim)
     _validate_checkpoint_dim(checkpoint, "action_dim", action_dim)
     _validate_checkpoint_dim(checkpoint, "hidden_dim", hidden_dim)
+    validate_encoding_schema(checkpoint, schema_version=schema_version)
     model_state = checkpoint.get("model_state")
     if not isinstance(model_state, dict):
-        raise ValueError("BC checkpoint is missing model_state")
+        raise ValueError("initial checkpoint is missing model_state")
+    if any(str(key).startswith("policy_net.") for key in model_state):
+        return "ppo", model_state
     policy_state = _bc_ranker_state_to_policy_state(model_state)
-    if not policy_state:
-        raise ValueError("BC checkpoint model_state has no ranker net.* parameters")
-    return policy_state
+    if policy_state:
+        return "bc", policy_state
+    raise ValueError("initial checkpoint model_state is neither PPO actor-critic nor BC ranker")
 
 
 def _validate_checkpoint_dim(checkpoint: dict[str, object], key: str, expected: int) -> None:
     actual = checkpoint.get(key)
     if actual != expected:
-        raise ValueError(f"BC checkpoint {key}={actual!r} does not match PPO {key}={expected!r}")
+        raise ValueError(f"initial checkpoint {key}={actual!r} does not match PPO {key}={expected!r}")
 
 
 def _bc_ranker_state_to_policy_state(model_state: dict[str, object]) -> dict[str, object]:
-    return {key.removeprefix("net."): value for key, value in model_state.items() if key.startswith("net.")}
+    return {
+        str(key).removeprefix("net."): value
+        for key, value in model_state.items()
+        if str(key).startswith("net.")
+    }
 
 
 def _rollout_metrics(rollouts: list[RolloutResult]) -> RolloutMetrics:
@@ -415,7 +482,16 @@ def _iter_batches(indices: list[int], batch_size: int):
         yield indices[start : start + batch_size]
 
 
-def _initial_dimensions(seed: str) -> tuple[int, int]:
+def _schema_version_for_training(torch, checkpoint_path: Path | None, device) -> str:
+    if checkpoint_path is None:
+        return ENCODING_SCHEMA_VERSION
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if not isinstance(checkpoint, dict):
+        raise ValueError("initial checkpoint must be a dictionary")
+    return validate_encoding_schema(checkpoint)
+
+
+def _initial_dimensions(seed: str, *, schema_version: str = ENCODING_SCHEMA_VERSION) -> tuple[int, int]:
     from training.env import GuandanTrainingEnv
 
     env = GuandanTrainingEnv()
@@ -427,14 +503,25 @@ def _initial_dimensions(seed: str) -> tuple[int, int]:
     actions = env.legal_actions(actor)
     if not actions:
         raise RuntimeError("initial training environment has no legal actions")
-    observation_dim = len(encode_observation(snapshot).values)
-    action_dim = len(encode_action(actions[0], snapshot).values)
+    observation_dim = len(encode_observation(snapshot, schema_version=schema_version).values)
+    action_dim = len(encode_action(actions[0], snapshot, schema_version=schema_version).values)
     return observation_dim, action_dim
 
 
-def _policy_logits_and_value(torch, model, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...], device):
-    observation = torch.tensor(encode_observation(snapshot).values, dtype=torch.float32, device=device)
-    action_values = [encode_action(action, snapshot).values for action in actions]
+def _policy_logits_and_value(
+    torch,
+    model,
+    snapshot: SeatSnapshot,
+    actions: tuple[ActionCandidate, ...],
+    device,
+    schema_version: str = ENCODING_SCHEMA_VERSION,
+):
+    observation = torch.tensor(
+        encode_observation(snapshot, schema_version=schema_version).values,
+        dtype=torch.float32,
+        device=device,
+    )
+    action_values = [encode_action(action, snapshot, schema_version=schema_version).values for action in actions]
     action_features = torch.tensor(action_values, dtype=torch.float32, device=device)
     observations = observation.expand(action_features.shape[0], -1)
     pair_features = torch.cat((observations, action_features), dim=1)
@@ -479,7 +566,12 @@ def _transition_batch_logits_and_values(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train a Guandan candidate policy with self-play PPO.")
     parser.add_argument("output", help="Output checkpoint path.")
-    parser.add_argument("--init-policy", help="BC ranker checkpoint used to initialize the PPO policy network.")
+    parser.add_argument(
+        "--init-policy",
+        "--init-model",
+        dest="init_policy",
+        help="BC ranker or trained PPO actor-critic checkpoint used to initialize PPO training.",
+    )
     parser.add_argument("--seed", action="append", help="Rollout seed. Can be repeated.")
     parser.add_argument("--seed-count", type=int, help="Generate rollout seeds ppo-seed-0..N-1.")
     parser.add_argument("--updates", type=int, default=1)

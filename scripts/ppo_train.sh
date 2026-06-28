@@ -1,19 +1,49 @@
 #!/bin/bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.pt \
-  --init-policy data/models/bc_ranker.pt \
-  --seed-count 8 \
-  --updates 100 \
-  --epochs-per-update 3 \
-  --max-deals 32 \
-  --max-steps 200000 \
+set -euo pipefail
+
+BASE_MODEL="${BASE_MODEL:-data/models/ppo_actor_critic.pt}"
+OUTPUT_MODEL="${OUTPUT_MODEL:-data/models/ppo_actor_critic.next.pt}"
+SEED_COUNT="${SEED_COUNT:-10}"
+UPDATES="${UPDATES:-100}"
+EPOCHS_PER_UPDATE="${EPOCHS_PER_UPDATE:-3}"
+MAX_DEALS="${MAX_DEALS:-32}"
+# Keep PPO updates as true minibatches; full-rollout batches create one optimizer step per epoch.
+BATCH_SIZE="${BATCH_SIZE:-1024}"
+MAX_STEPS="${MAX_STEPS:-50000}"
+DEVICE="${DEVICE:-cuda}"
+EVAL_SEED_COUNT="${EVAL_SEED_COUNT:-4}"
+EVAL_MAX_DEALS="${EVAL_MAX_DEALS:-1}"
+EVAL_MAX_STEPS="${EVAL_MAX_STEPS:-20000}"
+
+if [[ ! -f "${BASE_MODEL}" ]]; then
+  echo "missing base PPO checkpoint: ${BASE_MODEL}" >&2
+  exit 1
+fi
+
+uv run --extra train guandan-ppo-train "${OUTPUT_MODEL}" \
+  --init-model "${BASE_MODEL}" \
+  --seed-count "${SEED_COUNT}" \
+  --updates "${UPDATES}" \
+  --epochs-per-update "${EPOCHS_PER_UPDATE}" \
+  --max-deals "${MAX_DEALS}" \
+  --max-steps "${MAX_STEPS}" \
   --learning-rate 0.0001 \
   --gamma 0.995 \
   --gae-lambda 0.95 \
   --clip-epsilon 0.1 \
   --entropy-coef 0.003 \
   --value-coef 0.5 \
-  --batch-size 33554432 \
+  --batch-size "${BATCH_SIZE}" \
   --max-grad-norm 0.5 \
   --target-kl 0.03 \
   --dropout 0.0 \
-  --device cuda
+  --device "${DEVICE}"
+
+if [[ "${EVAL_SEED_COUNT}" != "0" ]]; then
+  uv run --extra train guandan-eval-gate "${OUTPUT_MODEL}" \
+    --previous-checkpoint "${BASE_MODEL}" \
+    --seed-count "${EVAL_SEED_COUNT}" \
+    --max-deals "${EVAL_MAX_DEALS}" \
+    --max-steps "${EVAL_MAX_STEPS}" \
+    --device "${DEVICE}"
+fi

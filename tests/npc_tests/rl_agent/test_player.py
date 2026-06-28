@@ -38,6 +38,16 @@ class RlAgentPlayerTests(unittest.TestCase):
         self.assertEqual(snapshot.public.hand_counts[snapshot.seat], 2)
         self.assertNotIn("other_hand", snapshot.public.current_trick or {})
 
+    def test_builds_public_played_counts_and_pass_count_from_action_request(self) -> None:
+        request = _lead_request()
+        request.snapshot["public"]["current_trick"] = {"pass_count": 2}
+        request.snapshot["public"]["played_card_counts"] = {"S-3": 1, "BJ": 2}
+
+        snapshot = seat_snapshot_from_request(request)
+
+        self.assertEqual((snapshot.public.current_trick or {}).get("pass_count"), 2)
+        self.assertEqual(snapshot.public.played_card_counts, {"S-3": 1, "BJ": 2})
+
 
 class _LastActionModel:
     def choose_action(self, snapshot, actions):

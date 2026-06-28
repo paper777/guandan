@@ -348,6 +348,7 @@ def _play_cards(state: MatchState, command: PlayCards) -> ReducerResult:
         turn=next_turn,
         current_trick=trick,
         report_10_done=report_10_done,
+        played_card_ids=(*state.deal.played_card_ids, *command.card_ids),
     )
     event_specs: list[tuple[str, dict[str, object]]] = [
         (

@@ -37,6 +37,7 @@ class PublicTableSnapshot:
     action_timeout_seconds: int = DEFAULT_ACTION_TIMEOUT_SECONDS
     acting_seat: Seat | None = None
     current_trick: dict[str, object] | None = None
+    played_card_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +67,15 @@ def public_snapshot(
         hand_counts = {seat: len(hand) for seat, hand in state.deal.hands.items()}
         current_turn = state.deal.turn
         finish_order = state.deal.finish_order
-        current_trick = _public_trick(state.deal.current_trick.last_play, state.deal.current_trick.last_play_seat)
+        current_trick = _public_trick(
+            state.deal.current_trick.last_play,
+            state.deal.current_trick.last_play_seat,
+            state.deal.current_trick.pass_count,
+        )
+        played_card_counts = _played_card_counts(state.deal.played_card_ids)
     else:
         current_trick = None
+        played_card_counts = {}
     seats = {
         seat: PublicPlayer(
             player_id=player.id,
@@ -93,6 +100,7 @@ def public_snapshot(
         action_timeout_seconds=action_timeout_seconds,
         acting_seat=acting_seat,
         current_trick=current_trick,
+        played_card_counts=played_card_counts,
     )
 
 
@@ -157,16 +165,32 @@ def seat_snapshot(
     )
 
 
-def _public_trick(last_play: PlayedHand | None, last_play_seat: Seat | None) -> dict[str, object] | None:
+def _public_trick(last_play: PlayedHand | None, last_play_seat: Seat | None, pass_count: int) -> dict[str, object] | None:
     if last_play is None or last_play_seat is None:
-        return None
+        return {"pass_count": pass_count} if pass_count else None
     return {
         "last_play_seat": last_play_seat.value,
         "card_ids": list(last_play.card_ids),
         "hand_type": last_play.type.value,
         "primary_rank": last_play.primary_rank.value,
         "length": last_play.length,
+        "pass_count": pass_count,
     }
+
+
+def _played_card_counts(card_ids: tuple[str, ...]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for card_id in card_ids:
+        face = _face(card_id)
+        counts[face] = counts.get(face, 0) + 1
+    return counts
+
+
+def _face(card_id: str) -> str:
+    card = CARD_BY_ID[card_id]
+    if card.suit is None:
+        return card.rank.value
+    return f"{card.suit.value}-{card.rank.value}"
 
 
 def _highest_eligible_tribute_card(card_ids: tuple[str, ...], level: Rank) -> tuple[str, ...]:

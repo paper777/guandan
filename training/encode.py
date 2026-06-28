@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from dataclasses import dataclass
 
 from server.domain.cards import CARD_BY_ID, STANDARD_RANKS, Rank, Suit, is_red_heart_level_card
+from server.domain.comparator import RankContext
 from server.domain.hand_types import HandType
 from server.domain.legal_actions import ActionCandidate
-from server.domain.seats import SEATS, Seat, Team
+from server.domain.seats import SEATS, Seat, Team, team_for_seat
 from server.domain.state import MatchPhase
-from server.services.snapshots import SeatSnapshot
+from server.services.snapshots import PublicTableSnapshot, SeatSnapshot
 
 
 CARD_FACES: tuple[str, ...] = tuple(
@@ -15,6 +19,8 @@ CARD_FACES: tuple[str, ...] = tuple(
 ) + (Rank.SMALL_JOKER.value, Rank.BIG_JOKER.value)
 ACTION_KINDS: tuple[str, ...] = ("pass", "play_cards", "submit_tribute", "return_tribute")
 LEGAL_ACTIONS: tuple[str, ...] = ("lead", "play_or_pass", "tribute", "return_tribute")
+ENCODING_SCHEMA_VERSION = "v2"
+LEGACY_ENCODING_SCHEMA_VERSION = "v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +32,8 @@ class EncodedVector:
         return dict(zip(self.names, self.values, strict=True))
 
 
-def encode_observation(snapshot: SeatSnapshot) -> EncodedVector:
+def encode_observation(snapshot: SeatSnapshot, *, schema_version: str | None = None) -> EncodedVector:
+    schema_version = _resolve_schema_version(schema_version)
     public = snapshot.public
     names: list[str] = []
     values: list[float] = []
@@ -83,6 +90,12 @@ def encode_observation(snapshot: SeatSnapshot) -> EncodedVector:
         names.append(f"hand_face/{face}")
         values.append(own_counts.get(face, 0) / 2.0)
 
+    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
+        played_counts = public.played_card_counts
+        for face in CARD_FACES:
+            names.append(f"played_face/{face}")
+            values.append(played_counts.get(face, 0) / 2.0)
+
     trick = public.current_trick or {}
     _extend_one_hot(names, values, "trick_last_seat", [seat.value for seat in SEATS], _string_or_none(trick.get("last_play_seat")))
     _extend_one_hot(
@@ -101,12 +114,16 @@ def encode_observation(snapshot: SeatSnapshot) -> EncodedVector:
     )
     names.append("trick_length")
     values.append(float(trick.get("length") or 0) / 8.0)
+    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
+        names.append("trick_pass_count")
+        values.append(float(trick.get("pass_count") or 0) / 3.0)
     names.append("return_rank_at_most_ten")
     values.append(1.0 if snapshot.return_rank_at_most_ten else 0.0)
     return EncodedVector(tuple(names), tuple(values))
 
 
-def encode_action(action: ActionCandidate, snapshot: SeatSnapshot) -> EncodedVector:
+def encode_action(action: ActionCandidate, snapshot: SeatSnapshot, *, schema_version: str | None = None) -> EncodedVector:
+    schema_version = _resolve_schema_version(schema_version)
     names: list[str] = []
     values: list[float] = []
     level = snapshot.public.current_level
@@ -142,7 +159,81 @@ def encode_action(action: ActionCandidate, snapshot: SeatSnapshot) -> EncodedVec
     values.append(1.0 if any(is_red_heart_level_card(CARD_BY_ID[card_id], level) for card_id in action.card_ids) else 0.0)
     names.append("remaining_after_action")
     values.append(max(len(snapshot.hand) - len(action.card_ids), 0) / 27.0)
+    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
+        _append_action_context_features(names, values, action, snapshot)
     return EncodedVector(tuple(names), tuple(values))
+
+
+def encoding_schema(schema_version: str | None = None) -> dict[str, object]:
+    schema_version = _resolve_schema_version(schema_version)
+    snapshot = _schema_snapshot()
+    action = ActionCandidate(
+        kind="play_cards",
+        card_ids=("D1-H-2",),
+        declared_type="single",
+        hand_type=HandType.SINGLE,
+        primary_rank=Rank.TWO,
+        length=1,
+    )
+    observation_names = encode_observation(snapshot, schema_version=schema_version).names
+    action_names = encode_action(action, snapshot, schema_version=schema_version).names
+    payload = {
+        "version": schema_version,
+        "observation_names": list(observation_names),
+        "action_names": list(action_names),
+        "normalization": "guandan-fixed-v1",
+    }
+    payload["hash"] = _schema_hash(payload)
+    return payload
+
+
+def validate_encoding_schema(checkpoint: dict[str, object], *, schema_version: str | None = None) -> str:
+    checkpoint_schema = checkpoint.get("encoding_schema")
+    if isinstance(checkpoint_schema, dict):
+        version = str(schema_version or checkpoint_schema.get("version") or ENCODING_SCHEMA_VERSION)
+        expected = encoding_schema(version)
+        checkpoint_hash = checkpoint_schema.get("hash")
+        if checkpoint_hash != expected["hash"]:
+            raise ValueError(
+                f"encoding schema mismatch: checkpoint={checkpoint_hash!r} runtime={expected['hash']!r}"
+            )
+        return version
+    observation_dim = int(checkpoint.get("observation_dim", -1))
+    action_dim = int(checkpoint.get("action_dim", -1))
+    for candidate_version in (LEGACY_ENCODING_SCHEMA_VERSION, ENCODING_SCHEMA_VERSION):
+        candidate = encoding_schema(candidate_version)
+        if (
+            len(candidate["observation_names"]) == observation_dim
+            and len(candidate["action_names"]) == action_dim
+        ):
+            return candidate_version
+    return schema_version or "custom"
+
+
+def _append_action_context_features(
+    names: list[str],
+    values: list[float],
+    action: ActionCandidate,
+    snapshot: SeatSnapshot,
+) -> None:
+    relation = _last_play_relation(snapshot)
+    opponent_danger = _opponent_is_dangerous(snapshot)
+    names.append("action_beats_partner")
+    values.append(1.0 if action.kind == "play_cards" and relation == "partner" else 0.0)
+    names.append("action_beats_opponent")
+    values.append(1.0 if action.kind == "play_cards" and relation == "opponent" else 0.0)
+    names.append("action_finishes_hand")
+    values.append(1.0 if action.kind == "play_cards" and len(action.card_ids) == len(snapshot.hand) else 0.0)
+    names.append("action_opponent_danger")
+    values.append(1.0 if opponent_danger else 0.0)
+    names.append("action_rank_margin")
+    values.append(_rank_margin(action, snapshot))
+    names.append("action_breaks_bomb")
+    values.append(1.0 if _breaks_bomb(action, snapshot) else 0.0)
+    names.append("action_breaks_sequence")
+    values.append(1.0 if _breaks_sequence(action, snapshot) else 0.0)
+    names.append("action_breaks_pair_run")
+    values.append(1.0 if _breaks_pair_run(action, snapshot) else 0.0)
 
 
 def _extend_one_hot(
@@ -178,3 +269,140 @@ def _standard_rank_index(rank: Rank) -> int:
 
 def _string_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _resolve_schema_version(schema_version: str | None) -> str:
+    version = schema_version or os.environ.get("GUANDAN_ENCODING_SCHEMA") or ENCODING_SCHEMA_VERSION
+    if version not in {LEGACY_ENCODING_SCHEMA_VERSION, ENCODING_SCHEMA_VERSION}:
+        raise ValueError(f"unsupported encoding schema version: {version}")
+    return version
+
+
+def _schema_hash(payload: dict[str, object]) -> str:
+    normalized = json.dumps(
+        {key: value for key, value in payload.items() if key != "hash"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _schema_snapshot() -> SeatSnapshot:
+    public = PublicTableSnapshot(
+        table_id="schema",
+        deal_id=1,
+        phase=MatchPhase.PLAYING,
+        seats={},
+        hand_counts={seat: 1 for seat in SEATS},
+        current_turn=Seat.EAST,
+        finish_order=(),
+        event_seq=1,
+        current_level=Rank.TWO,
+        level_by_team={Team.EAST_WEST: Rank.TWO, Team.SOUTH_NORTH: Rank.TWO},
+        acting_seat=Seat.EAST,
+        current_trick={
+            "last_play_seat": Seat.SOUTH.value,
+            "card_ids": ["D1-S-3"],
+            "hand_type": HandType.SINGLE.value,
+            "primary_rank": Rank.THREE.value,
+            "length": 1,
+            "pass_count": 1,
+        },
+        played_card_counts={face: 0 for face in CARD_FACES},
+    )
+    return SeatSnapshot(
+        public=public,
+        seat=Seat.EAST,
+        hand=("D1-H-2",),
+        legal_action="play_or_pass",
+    )
+
+
+def _last_play_relation(snapshot: SeatSnapshot) -> str | None:
+    trick = snapshot.public.current_trick or {}
+    raw_seat = trick.get("last_play_seat")
+    if not isinstance(raw_seat, str):
+        return None
+    try:
+        seat = Seat(raw_seat)
+    except ValueError:
+        return None
+    if seat == snapshot.seat:
+        return "self"
+    return "partner" if team_for_seat(seat) == team_for_seat(snapshot.seat) else "opponent"
+
+
+def _opponent_is_dangerous(snapshot: SeatSnapshot) -> bool:
+    own_team = team_for_seat(snapshot.seat)
+    return any(
+        team_for_seat(seat) != own_team and 0 < snapshot.public.hand_counts.get(seat, 0) <= 2
+        for seat in SEATS
+    )
+
+
+def _rank_margin(action: ActionCandidate, snapshot: SeatSnapshot) -> float:
+    if action.kind != "play_cards" or action.primary_rank is None:
+        return 0.0
+    trick = snapshot.public.current_trick or {}
+    raw_rank = _string_or_none(trick.get("primary_rank"))
+    if raw_rank is None:
+        return 0.0
+    try:
+        current_rank = Rank(raw_rank)
+    except ValueError:
+        return 0.0
+    ctx = RankContext(snapshot.public.current_level)
+    if action.hand_type in {HandType.BOMB, HandType.STRAIGHT_FLUSH, HandType.FOUR_JOKERS} and trick.get("hand_type") not in {
+        HandType.BOMB.value,
+        HandType.STRAIGHT_FLUSH.value,
+        HandType.FOUR_JOKERS.value,
+    }:
+        return 1.0
+    return _clamp((ctx.rank_value(action.primary_rank) - ctx.rank_value(current_rank)) / 15.0, -1.0, 1.0)
+
+
+def _breaks_bomb(action: ActionCandidate, snapshot: SeatSnapshot) -> bool:
+    if action.kind != "play_cards" or action.hand_type in {HandType.BOMB, HandType.STRAIGHT_FLUSH, HandType.FOUR_JOKERS}:
+        return False
+    selected = set(action.card_ids)
+    ranks = {rank for rank, count in _rank_counts(snapshot.hand).items() if rank not in {Rank.SMALL_JOKER, Rank.BIG_JOKER} and count >= 4}
+    if any(CARD_BY_ID[card_id].rank in ranks for card_id in selected):
+        return True
+    jokers = {card_id for card_id in snapshot.hand if CARD_BY_ID[card_id].is_joker}
+    return len(jokers) == 4 and not selected.isdisjoint(jokers)
+
+
+def _breaks_sequence(action: ActionCandidate, snapshot: SeatSnapshot) -> bool:
+    if action.kind != "play_cards" or action.hand_type in {HandType.STRAIGHT, HandType.STRAIGHT_FLUSH}:
+        return False
+    selected_ranks = {CARD_BY_ID[card_id].rank for card_id in action.card_ids}
+    hand_ranks = {CARD_BY_ID[card_id].rank for card_id in snapshot.hand if CARD_BY_ID[card_id].rank in STANDARD_RANKS}
+    for start in range(0, len(tuple(STANDARD_RANKS)) - 4):
+        window = set(STANDARD_RANKS[start : start + 5])
+        if window.issubset(hand_ranks) and not selected_ranks.isdisjoint(window):
+            return True
+    return False
+
+
+def _breaks_pair_run(action: ActionCandidate, snapshot: SeatSnapshot) -> bool:
+    if action.kind != "play_cards" or action.hand_type in {
+        HandType.PAIR,
+        HandType.THREE_PAIR_RUN,
+        HandType.TRIPLE_RUN,
+        HandType.FULL_HOUSE,
+    }:
+        return False
+    pair_ranks = {rank for rank, count in _rank_counts(snapshot.hand).items() if count >= 2}
+    return any(CARD_BY_ID[card_id].rank in pair_ranks for card_id in action.card_ids)
+
+
+def _rank_counts(card_ids: tuple[str, ...]) -> dict[Rank, int]:
+    counts: dict[Rank, int] = {}
+    for card_id in card_ids:
+        rank = CARD_BY_ID[card_id].rank
+        counts[rank] = counts.get(rank, 0) + 1
+    return counts
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))

@@ -17,6 +17,7 @@ from training.bc_cache import (
     load_tensor_cache,
 )
 from training.collect import BcSample, iter_jsonl
+from training.encode import ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION, encoding_schema
 from training.model import build_candidate_ranker, pair_feature_dim, require_torch
 
 
@@ -88,6 +89,7 @@ class DatasetInfo:
     action_dim: int
     observation_names: tuple[str, ...]
     action_names: tuple[str, ...]
+    encoding_schema: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +268,7 @@ def train_behavior_clone(config: TrainingConfig) -> TrainingSummary:
             "model_state": best_model_state,
             "observation_names": dataset_info.observation_names,
             "action_names": dataset_info.action_names,
+            "encoding_schema": dataset_info.encoding_schema,
             "observation_dim": dataset_info.observation_dim,
             "action_dim": dataset_info.action_dim,
             "hidden_dim": config.hidden_dim,
@@ -380,13 +383,18 @@ def _dataset_info_from_cache(cache: TensorCache) -> DatasetInfo:
     seed_counts_obj = manifest.get("seed_counts")
     if not isinstance(seed_counts_obj, dict):
         raise ValueError("tensor cache manifest is missing seed_counts")
+    observation_dim = int(manifest["observation_dim"])
+    action_dim = int(manifest["action_dim"])
+    observation_names = tuple(str(name) for name in _manifest_list(manifest, "observation_names"))
+    action_names = tuple(str(name) for name in _manifest_list(manifest, "action_names"))
     return DatasetInfo(
         samples=int(manifest["samples"]),
         seed_counts={str(seed): int(count) for seed, count in seed_counts_obj.items()},
-        observation_dim=int(manifest["observation_dim"]),
-        action_dim=int(manifest["action_dim"]),
-        observation_names=tuple(str(name) for name in _manifest_list(manifest, "observation_names")),
-        action_names=tuple(str(name) for name in _manifest_list(manifest, "action_names")),
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        observation_names=observation_names,
+        action_names=action_names,
+        encoding_schema=_known_encoding_schema(observation_names, action_names, observation_dim, action_dim),
     )
 
 
@@ -704,7 +712,26 @@ def _inspect_dataset(path: Path, *, limit: int | None) -> DatasetInfo:
         action_dim=action_dim,
         observation_names=observation_names,
         action_names=action_names,
+        encoding_schema=_known_encoding_schema(observation_names, action_names, observation_dim, action_dim),
     )
+
+
+def _known_encoding_schema(
+    observation_names: tuple[str, ...],
+    action_names: tuple[str, ...],
+    observation_dim: int,
+    action_dim: int,
+) -> dict[str, object] | None:
+    for version in (ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION):
+        schema = encoding_schema(version)
+        schema_observation_names = tuple(str(name) for name in schema["observation_names"])
+        schema_action_names = tuple(str(name) for name in schema["action_names"])
+        if observation_names and action_names:
+            if observation_names == schema_observation_names and action_names == schema_action_names:
+                return schema
+        elif len(schema_observation_names) == observation_dim and len(schema_action_names) == action_dim:
+            return schema
+    return None
 
 
 def _validate_dimensions(samples: tuple[BcSample, ...], observation_dim: int, action_dim: int) -> None:
