@@ -81,6 +81,14 @@ class WebUiTests(unittest.TestCase):
         self.assertIn(b"--played-card-width: 84px", body)
         self.assertIn(b"width: min(520px, 100%)", body)
         self.assertIn(b"overflow-wrap: anywhere", body)
+        self.assertIn(b'/ui/assets/showdown/table_v2.png', body)
+        self.assertNotIn(b'/ui/assets/showdown/gameboard.png', body)
+        self.assertNotIn(b'/ui/assets/showdown/table.png', body)
+        self.assertIn(b"--wood: #4a2e1f", body)
+        self.assertIn(b"--card-face: #fffaf0", body)
+        self.assertIn(b".bottom-strip .brand-mark", body)
+        self.assertIn(b".side-panel button", body)
+        self.assertIn(b"border-top: 1px solid rgba(217, 164, 65, 0.42)", body)
         self.assertNotIn(b"--played-card-width: 72px", body)
         self.assertNotIn(b"--human-card-gap", body)
 
@@ -99,6 +107,13 @@ class WebUiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b'const TURN_ORDER = ["E", "N", "W", "S"];', body)
         self.assertIn(b'return ["bottom", "right", "top", "left"][relative];', body)
+
+    def test_table_v2_asset_served(self) -> None:
+        status, headers, body = asyncio.run(call_raw("/ui/assets/showdown/table_v2.png"))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "image/png")
+        self.assertTrue(body.startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_unknown_ui_asset_returns_404(self) -> None:
         status, _, _ = asyncio.run(call_raw("/ui/missing.js"))

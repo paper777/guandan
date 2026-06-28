@@ -4,9 +4,13 @@
   --muted: #69746f;
   --paper: #f7f5ef;
   --panel: #fffaf0;
+  --card-face: #fffaf0;
+  --card-face-low: #efe6d3;
   --line: rgba(23, 32, 29, 0.16);
   --green: #17674f;
   --green-deep: #0f3f34;
+  --wood: #4a2e1f;
+  --wood-deep: #211712;
   --red: #a3323b;
   --blue: #315e9f;
   --gold: #d9a441;
@@ -153,7 +157,7 @@ select {
   padding: 18px 18px 12px 18px;
   background:
     linear-gradient(180deg, rgba(255, 250, 240, 0.92), rgba(231, 235, 224, 0.86)),
-    url("/ui/assets/showdown/table.png") center / 420px auto repeat;
+    #e1dfd4;
 }
 
 .table-stage {
@@ -197,9 +201,9 @@ select {
   border: 1px solid rgba(255, 250, 240, 0.32);
   box-shadow: var(--shadow);
   background:
-    linear-gradient(180deg, rgba(15, 63, 52, 0.12), rgba(15, 63, 52, 0.24)),
-    url("/ui/assets/showdown/gameboard.png") center bottom / 100% 122% no-repeat,
-    radial-gradient(circle at center, #24815f 0, var(--green) 52%, var(--green-deep) 100%);
+    linear-gradient(180deg, rgba(13, 15, 12, 0.1), rgba(13, 15, 12, 0.22)),
+    url("/ui/assets/showdown/table_v2.png") center center / cover no-repeat,
+    #211914;
 }
 
 .seat-zone {
@@ -601,13 +605,24 @@ select {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 250, 240, 0.18);
+  background:
+    radial-gradient(circle at top, rgba(217, 164, 65, 0.16), transparent 56%),
+    linear-gradient(180deg, var(--wood), var(--wood-deep));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 250, 240, 0.06),
+    0 16px 34px rgba(13, 20, 18, 0.18);
 }
 
 .panel-section {
   border-radius: 8px;
-  border: 1px solid var(--line);
-  background: rgba(255, 250, 240, 0.94);
-  box-shadow: 0 10px 24px rgba(13, 20, 18, 0.08);
+  border: 1px solid rgba(87, 55, 34, 0.3);
+  background: linear-gradient(180deg, var(--card-face), var(--card-face-low));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 10px 20px rgba(13, 20, 18, 0.16);
   padding: 12px;
 }
 
@@ -628,6 +643,9 @@ select {
 .score-panel .score-pill {
   min-width: 0;
   width: 100%;
+  background: linear-gradient(180deg, var(--card-face), var(--card-face-low));
+  border-color: rgba(87, 55, 34, 0.24);
+  box-shadow: inset 0 -1px 0 rgba(87, 55, 34, 0.1);
 }
 
 .bottom-strip {
@@ -636,9 +654,20 @@ select {
   align-items: center;
   gap: 14px;
   padding: 12px 18px;
-  background: #3b2c32;
+  border-top: 1px solid rgba(217, 164, 65, 0.42);
+  background:
+    radial-gradient(circle at 18% 0, rgba(217, 164, 65, 0.18), transparent 34%),
+    linear-gradient(90deg, var(--wood), var(--wood-deep));
   color: #fffaf0;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 240, 0.08),
+    0 -8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.bottom-strip .brand-mark {
+  background: linear-gradient(135deg, #f0cf78, var(--gold));
+  border: 1px solid rgba(255, 250, 240, 0.36);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
 }
 
 .bottom-strip .brand-title {
@@ -658,7 +687,9 @@ select {
 }
 
 .bottom-strip .status-line {
-  background: rgba(255, 250, 240, 0.9);
+  background: linear-gradient(180deg, var(--card-face), var(--card-face-low));
+  border-color: rgba(87, 55, 34, 0.34);
+  box-shadow: inset 0 -1px 0 rgba(87, 55, 34, 0.12);
 }
 
 .section-title {
@@ -667,6 +698,21 @@ select {
   color: var(--muted);
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.side-panel .section-title {
+  color: #5d4a38;
+}
+
+.score-panel {
+  background:
+    radial-gradient(circle at top, rgba(255, 250, 240, 0.1), transparent 58%),
+    linear-gradient(180deg, var(--green), var(--green-deep));
+  border-color: rgba(217, 164, 65, 0.38);
+}
+
+.score-panel .section-title {
+  color: #eadfcd;
 }
 
 .seat-tabs,
@@ -683,9 +729,36 @@ select {
   padding: 0 10px;
 }
 
+.side-panel button,
+.bottom-strip button,
+.bottom-strip select {
+  background: linear-gradient(180deg, var(--card-face), var(--card-face-low));
+  border-color: rgba(87, 55, 34, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    inset 0 -1px 0 rgba(87, 55, 34, 0.12);
+}
+
+.side-panel button:hover:not(:disabled),
+.bottom-strip button:hover:not(:disabled) {
+  border-color: rgba(217, 164, 65, 0.66);
+}
+
+.bottom-strip .primary-button {
+  background: linear-gradient(180deg, #3f72b6, var(--blue));
+  border-color: rgba(255, 250, 240, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 3px 8px rgba(0, 0, 0, 0.16);
+}
+
+.bottom-strip .primary-button.accent {
+  background: linear-gradient(180deg, #bb4650, var(--red));
+}
+
 .seat-tab.active {
-  background: var(--green);
-  border-color: var(--green);
+  background: linear-gradient(180deg, var(--green), var(--green-deep));
+  border-color: rgba(217, 164, 65, 0.48);
   color: #ffffff;
   font-weight: 800;
 }
@@ -708,7 +781,8 @@ select {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: #e7e0d2;
+  background: linear-gradient(180deg, var(--card-face), #e7e0d2);
+  border: 1px solid rgba(87, 55, 34, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -747,11 +821,13 @@ select {
 }
 
 .event-item {
+  border: 1px solid rgba(87, 55, 34, 0.18);
   border-left: 3px solid var(--blue);
   padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 250, 240, 0.8);
   border-radius: 0 8px 8px 0;
   font-size: 0.84rem;
+  box-shadow: 0 4px 10px rgba(13, 20, 18, 0.08);
 }
 
 .event-type {
