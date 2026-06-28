@@ -76,16 +76,16 @@ uv run --extra train guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc
 Train the behavior-cloning candidate ranker on CUDA:
 
 ```bash
-uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --model-architecture dual_tower_v1 --device cuda
+uv run --extra train guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128 --device cuda
 ```
 
 Run a PPO self-play continuation run on CUDA:
 
 ```bash
-uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256 --opponent-pool self,heuristic,dummy,previous --rollout-workers 4 --reward-shaping-start 0.02 --reward-shaping-end 0.0 --device cuda
+uv run --extra train guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-policy data/models/bc_ranker.pt --seed-count 10 --updates 10 --epochs-per-update 3 --max-deals 24 --batch-size 1024 --opponent-pool self,heuristic,previous --rollout-workers 16 --rollout-processes 16 --inference-batch-size 16 --inference-batch-wait-ms 1.0 --reward-shaping-start 0.02 --reward-shaping-end 0.0 --device cuda
 ```
 
-`scripts/ppo_train.sh` defaults to `ROLLOUT_WORKERS=4` for opponent-pool rollouts; override it when CPU contention or GPU inference saturation becomes the bottleneck.
+`scripts/ppo_train.sh` defaults to bootstrapping from `data/models/bc_ranker.pt`, `ROLLOUT_WORKERS=16`, `ROLLOUT_PROCESSES=16`, `INFERENCE_BATCH_SIZE=16`, and candidate-count minibatch bucketing. Override `INIT_CHECKPOINT` or `BASE_MODEL` to continue from an existing PPO actor-critic; set `CANDIDATE_BUCKET_BATCHES=0` to restore fully shuffled minibatches.
 
 Evaluate a checkpoint against fixed dummy, heuristic, and previous-model gates:
 

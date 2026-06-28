@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 
-CONCAT_MLP_ARCHITECTURE = "concat_mlp"
 DUAL_TOWER_ARCHITECTURE = "dual_tower_v1"
 DEFAULT_MODEL_ARCHITECTURE = DUAL_TOWER_ARCHITECTURE
 
@@ -25,44 +24,24 @@ def build_candidate_ranker(
     action_dim: int | None = None,
     hidden_dim: int = 256,
     dropout: float = 0.1,
-    architecture: str = DEFAULT_MODEL_ARCHITECTURE,
 ) -> Any:
     torch = require_torch()
     nn = torch.nn
-    _validate_architecture(architecture)
-    if architecture == DUAL_TOWER_ARCHITECTURE:
-        observation_dim, action_dim = _require_split_dims(input_dim, observation_dim, action_dim)
-
-        class CandidateRanker(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.policy_net = _build_dual_tower_policy_scorer(
-                    nn,
-                    observation_dim=observation_dim,
-                    action_dim=action_dim,
-                    hidden_dim=hidden_dim,
-                    dropout=dropout,
-                )
-
-            def forward(self, pair_features: Any) -> Any:
-                return self.policy_net(pair_features).squeeze(-1)
-
-        return CandidateRanker()
+    observation_dim, action_dim = _require_split_dims(input_dim, observation_dim, action_dim)
 
     class CandidateRanker(nn.Module):
         def __init__(self) -> None:
             super().__init__()
-            self.net = nn.Sequential(
-                nn.Linear(input_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, 1),
+            self.policy_net = _build_dual_tower_policy_scorer(
+                nn,
+                observation_dim=observation_dim,
+                action_dim=action_dim,
+                hidden_dim=hidden_dim,
+                dropout=dropout,
             )
 
         def forward(self, pair_features: Any) -> Any:
-            return self.net(pair_features).squeeze(-1)
+            return self.policy_net(pair_features).squeeze(-1)
 
     return CandidateRanker()
 
@@ -75,34 +54,22 @@ def build_candidate_actor_critic(
     value_input_dim: int | None = None,
     hidden_dim: int = 256,
     dropout: float = 0.1,
-    architecture: str = DEFAULT_MODEL_ARCHITECTURE,
 ) -> Any:
     torch = require_torch()
     nn = torch.nn
-    _validate_architecture(architecture)
     value_dim = value_input_dim or observation_dim
+    observation_dim, action_dim = _require_split_dims(pair_input_dim, observation_dim, action_dim)
 
     class CandidateActorCritic(nn.Module):
         def __init__(self) -> None:
             super().__init__()
-            if architecture == DUAL_TOWER_ARCHITECTURE:
-                obs_dim, act_dim = _require_split_dims(pair_input_dim, observation_dim, action_dim)
-                self.policy_net = _build_dual_tower_policy_scorer(
-                    nn,
-                    observation_dim=obs_dim,
-                    action_dim=act_dim,
-                    hidden_dim=hidden_dim,
-                    dropout=dropout,
-                )
-            else:
-                self.policy_net = nn.Sequential(
-                    nn.Linear(pair_input_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Linear(hidden_dim, 1),
-                )
+            self.policy_net = _build_dual_tower_policy_scorer(
+                nn,
+                observation_dim=observation_dim,
+                action_dim=action_dim,
+                hidden_dim=hidden_dim,
+                dropout=dropout,
+            )
             self.value_net = nn.Sequential(
                 nn.Linear(value_dim, hidden_dim),
                 nn.ReLU(),
@@ -123,11 +90,6 @@ def build_candidate_actor_critic(
 
 def pair_feature_dim(observation_dim: int, action_dim: int) -> int:
     return observation_dim + action_dim
-
-
-def _validate_architecture(architecture: str) -> None:
-    if architecture not in {CONCAT_MLP_ARCHITECTURE, DUAL_TOWER_ARCHITECTURE}:
-        raise ValueError(f"unsupported model architecture: {architecture}")
 
 
 def _require_split_dims(

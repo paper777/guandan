@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import time
+from dataclasses import dataclass, field, replace
 from typing import Mapping, Protocol
 
 from server.domain.legal_actions import ActionCandidate
@@ -13,16 +14,80 @@ from training.heuristic import HeuristicPolicy
 
 
 @dataclass(frozen=True, slots=True)
+class RolloutEncodedFeatures:
+    observation_names: tuple[str, ...]
+    observation_values: tuple[float, ...]
+    action_names: tuple[str, ...]
+    candidate_values: tuple[tuple[float, ...], ...]
+    critic_observation_values: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class RolloutDecision:
     action: ActionCandidate
     action_index: int
     log_prob: float = 0.0
     value: float = 0.0
+    encoded_features: RolloutEncodedFeatures | None = None
 
 
 class RolloutPolicy(Protocol):
     def choose_decision(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...]) -> RolloutDecision:
         raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class RolloutProfile:
+    decisions: int = 0
+    recorded_transitions: int = 0
+    candidate_count_total: int = 0
+    candidate_count_max: int = 0
+    encoded_transition_reuses: int = 0
+    encoded_transition_misses: int = 0
+    legal_action_seconds: float = 0.0
+    policy_seconds: float = 0.0
+    critic_encode_seconds: float = 0.0
+    transition_encode_seconds: float = 0.0
+    env_step_seconds: float = 0.0
+
+    @property
+    def average_candidate_count(self) -> float:
+        return self.candidate_count_total / self.decisions if self.decisions else 0.0
+
+
+@dataclass(slots=True)
+class _RolloutProfileAccumulator:
+    decisions: int = 0
+    recorded_transitions: int = 0
+    candidate_count_total: int = 0
+    candidate_count_max: int = 0
+    encoded_transition_reuses: int = 0
+    encoded_transition_misses: int = 0
+    legal_action_seconds: float = 0.0
+    policy_seconds: float = 0.0
+    critic_encode_seconds: float = 0.0
+    transition_encode_seconds: float = 0.0
+    env_step_seconds: float = 0.0
+
+    def add_candidates(self, count: int) -> None:
+        self.decisions += 1
+        self.candidate_count_total += count
+        self.candidate_count_max = max(self.candidate_count_max, count)
+
+    def snapshot(self) -> RolloutProfile:
+        return RolloutProfile(
+            decisions=self.decisions,
+            recorded_transitions=self.recorded_transitions,
+            candidate_count_total=self.candidate_count_total,
+            candidate_count_max=self.candidate_count_max,
+            encoded_transition_reuses=self.encoded_transition_reuses,
+            encoded_transition_misses=self.encoded_transition_misses,
+            legal_action_seconds=self.legal_action_seconds,
+            policy_seconds=self.policy_seconds,
+            critic_encode_seconds=self.critic_encode_seconds,
+            transition_encode_seconds=self.transition_encode_seconds,
+            env_step_seconds=self.env_step_seconds,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +116,7 @@ class RolloutResult:
     completed_deals: int
     steps: int
     stopped_reason: str
+    profile: RolloutProfile = field(default_factory=RolloutProfile)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +145,7 @@ def collect_rollout(
     steps = 0
     stopped_reason = "match_complete"
     seed_label = repr(seed)
+    profile = _RolloutProfileAccumulator()
 
     while env.state.phase != MatchPhase.MATCH_COMPLETE:
         if steps >= max_steps:
@@ -103,19 +170,35 @@ def collect_rollout(
             break
 
         snapshot = env.observe(actor)
+        started_at = time.perf_counter()
         actions = env.legal_actions(actor)
+        profile.legal_action_seconds += time.perf_counter() - started_at
+        profile.add_candidates(len(actions))
         policy = policies[actor]
+        started_at = time.perf_counter()
         if hasattr(policy, "choose_decision_with_state"):
             decision = policy.choose_decision_with_state(snapshot, actions, env.state)
         else:
             decision = policy.choose_decision(snapshot, actions)
+        profile.policy_seconds += time.perf_counter() - started_at
         schema_version = str(getattr(policy, "schema_version", ENCODING_SCHEMA_VERSION))
         if record_seats is None or actor in record_seats:
-            critic_values = (
-                encode_critic_observation(env.state, actor, schema_version=schema_version).values
-                if getattr(policy, "centralized_critic", False)
-                else ()
-            )
+            encoded_features = decision.encoded_features
+            started_at = time.perf_counter()
+            if getattr(policy, "centralized_critic", False):
+                critic_values = (
+                    encoded_features.critic_observation_values
+                    if encoded_features is not None and encoded_features.critic_observation_values
+                    else encode_critic_observation(env.state, actor, schema_version=schema_version).values
+                )
+            else:
+                critic_values = ()
+            profile.critic_encode_seconds += time.perf_counter() - started_at
+            started_at = time.perf_counter()
+            if _decision_has_transition_features(decision, len(actions)):
+                profile.encoded_transition_reuses += 1
+            else:
+                profile.encoded_transition_misses += 1
             transitions.append(
                 _transition_from_decision(
                     seed_label,
@@ -126,9 +209,13 @@ def collect_rollout(
                     critic_observation_values=critic_values,
                 )
             )
+            profile.transition_encode_seconds += time.perf_counter() - started_at
+            profile.recorded_transitions += 1
             latest_by_seat[actor] = len(transitions) - 1
 
+        started_at = time.perf_counter()
         step = env.step(actor, decision.action)
+        profile.env_step_seconds += time.perf_counter() - started_at
         steps += 1
         if step.rejection is not None:
             stopped_reason = f"rejected:{step.rejection.code.value}"
@@ -139,7 +226,7 @@ def collect_rollout(
     if env.state.phase == MatchPhase.MATCH_COMPLETE and env.state.last_deal_result is not None:
         completed_deals += 1
 
-    return RolloutResult(tuple(transitions), completed_deals, steps, stopped_reason)
+    return RolloutResult(tuple(transitions), completed_deals, steps, stopped_reason, profile.snapshot())
 
 
 def collect_heuristic_rollout(
@@ -181,18 +268,28 @@ def _transition_from_decision(
     schema_version: str = ENCODING_SCHEMA_VERSION,
     critic_observation_values: tuple[float, ...] = (),
 ) -> RolloutTransition:
-    observation = encode_observation(snapshot, schema_version=schema_version)
-    action_vectors = tuple(encode_action(action, snapshot, schema_version=schema_version) for action in actions)
-    action_names = action_vectors[0].names if action_vectors else ()
+    encoded_features = decision.encoded_features
+    if encoded_features is not None and len(encoded_features.candidate_values) == len(actions):
+        observation_names = encoded_features.observation_names
+        observation_values = encoded_features.observation_values
+        action_names = encoded_features.action_names
+        candidate_values = encoded_features.candidate_values
+    else:
+        observation = encode_observation(snapshot, schema_version=schema_version)
+        action_vectors = tuple(encode_action(action, snapshot, schema_version=schema_version) for action in actions)
+        observation_names = observation.names
+        observation_values = observation.values
+        action_names = action_vectors[0].names if action_vectors else ()
+        candidate_values = tuple(vector.values for vector in action_vectors)
     return RolloutTransition(
         seed=seed,
         deal_id=snapshot.public.deal_id,
         event_seq=snapshot.public.event_seq,
         seat=snapshot.seat.value,
-        observation_names=observation.names,
-        observation_values=observation.values,
+        observation_names=observation_names,
+        observation_values=observation_values,
         action_names=action_names,
-        candidate_values=tuple(vector.values for vector in action_vectors),
+        candidate_values=candidate_values,
         candidate_payloads=tuple(action.to_payload() for action in actions),
         action_index=decision.action_index,
         action_payload=decision.action.to_payload(),
@@ -200,6 +297,11 @@ def _transition_from_decision(
         value=decision.value,
         critic_observation_values=critic_observation_values,
     )
+
+
+def _decision_has_transition_features(decision: RolloutDecision, action_count: int) -> bool:
+    encoded_features = decision.encoded_features
+    return encoded_features is not None and len(encoded_features.candidate_values) == action_count
 
 
 def _apply_rewards(

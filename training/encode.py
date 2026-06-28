@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 
 from server.domain.cards import CARD_BY_ID, STANDARD_RANKS, Rank, Suit, is_red_heart_level_card
@@ -20,7 +19,6 @@ CARD_FACES: tuple[str, ...] = tuple(
 ACTION_KINDS: tuple[str, ...] = ("pass", "play_cards", "submit_tribute", "return_tribute")
 LEGAL_ACTIONS: tuple[str, ...] = ("lead", "play_or_pass", "tribute", "return_tribute")
 ENCODING_SCHEMA_VERSION = "v2"
-LEGACY_ENCODING_SCHEMA_VERSION = "v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +88,10 @@ def encode_observation(snapshot: SeatSnapshot, *, schema_version: str | None = N
         names.append(f"hand_face/{face}")
         values.append(own_counts.get(face, 0) / 2.0)
 
-    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
-        played_counts = public.played_card_counts
-        for face in CARD_FACES:
-            names.append(f"played_face/{face}")
-            values.append(played_counts.get(face, 0) / 2.0)
+    played_counts = public.played_card_counts
+    for face in CARD_FACES:
+        names.append(f"played_face/{face}")
+        values.append(played_counts.get(face, 0) / 2.0)
 
     trick = public.current_trick or {}
     _extend_one_hot(names, values, "trick_last_seat", [seat.value for seat in SEATS], _string_or_none(trick.get("last_play_seat")))
@@ -114,9 +111,8 @@ def encode_observation(snapshot: SeatSnapshot, *, schema_version: str | None = N
     )
     names.append("trick_length")
     values.append(float(trick.get("length") or 0) / 8.0)
-    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
-        names.append("trick_pass_count")
-        values.append(float(trick.get("pass_count") or 0) / 3.0)
+    names.append("trick_pass_count")
+    values.append(float(trick.get("pass_count") or 0) / 3.0)
     names.append("return_rank_at_most_ten")
     values.append(1.0 if snapshot.return_rank_at_most_ten else 0.0)
     return EncodedVector(tuple(names), tuple(values))
@@ -159,8 +155,7 @@ def encode_action(action: ActionCandidate, snapshot: SeatSnapshot, *, schema_ver
     values.append(1.0 if any(is_red_heart_level_card(CARD_BY_ID[card_id], level) for card_id in action.card_ids) else 0.0)
     names.append("remaining_after_action")
     values.append(max(len(snapshot.hand) - len(action.card_ids), 0) / 27.0)
-    if schema_version != LEGACY_ENCODING_SCHEMA_VERSION:
-        _append_action_context_features(names, values, action, snapshot)
+    _append_action_context_features(names, values, action, snapshot)
     return EncodedVector(tuple(names), tuple(values))
 
 
@@ -189,25 +184,28 @@ def encoding_schema(schema_version: str | None = None) -> dict[str, object]:
 
 def validate_encoding_schema(checkpoint: dict[str, object], *, schema_version: str | None = None) -> str:
     checkpoint_schema = checkpoint.get("encoding_schema")
-    if isinstance(checkpoint_schema, dict):
-        version = str(schema_version or checkpoint_schema.get("version") or ENCODING_SCHEMA_VERSION)
-        expected = encoding_schema(version)
-        checkpoint_hash = checkpoint_schema.get("hash")
-        if checkpoint_hash != expected["hash"]:
-            raise ValueError(
-                f"encoding schema mismatch: checkpoint={checkpoint_hash!r} runtime={expected['hash']!r}"
-            )
-        return version
+    if not isinstance(checkpoint_schema, dict):
+        raise ValueError("checkpoint is missing encoding_schema")
+    version = _resolve_schema_version(str(schema_version or checkpoint_schema.get("version") or ENCODING_SCHEMA_VERSION))
+    if checkpoint_schema.get("version") != version:
+        raise ValueError(
+            f"encoding schema version mismatch: checkpoint={checkpoint_schema.get('version')!r} "
+            f"runtime={version!r}"
+        )
+    expected = encoding_schema(version)
+    checkpoint_hash = checkpoint_schema.get("hash")
+    if checkpoint_hash != expected["hash"]:
+        raise ValueError(
+            f"encoding schema mismatch: checkpoint={checkpoint_hash!r} runtime={expected['hash']!r}"
+        )
     observation_dim = int(checkpoint.get("observation_dim", -1))
     action_dim = int(checkpoint.get("action_dim", -1))
-    for candidate_version in (LEGACY_ENCODING_SCHEMA_VERSION, ENCODING_SCHEMA_VERSION):
-        candidate = encoding_schema(candidate_version)
-        if (
-            len(candidate["observation_names"]) == observation_dim
-            and len(candidate["action_names"]) == action_dim
-        ):
-            return candidate_version
-    return schema_version or "custom"
+    if observation_dim != len(expected["observation_names"]) or action_dim != len(expected["action_names"]):
+        raise ValueError(
+            f"encoding schema dimension mismatch: checkpoint=({observation_dim}, {action_dim}) "
+            f"runtime=({len(expected['observation_names'])}, {len(expected['action_names'])})"
+        )
+    return version
 
 
 def encode_critic_observation(
@@ -345,8 +343,8 @@ def _string_or_none(value: object) -> str | None:
 
 
 def _resolve_schema_version(schema_version: str | None) -> str:
-    version = schema_version or os.environ.get("GUANDAN_ENCODING_SCHEMA") or ENCODING_SCHEMA_VERSION
-    if version not in {LEGACY_ENCODING_SCHEMA_VERSION, ENCODING_SCHEMA_VERSION}:
+    version = schema_version or ENCODING_SCHEMA_VERSION
+    if version != ENCODING_SCHEMA_VERSION:
         raise ValueError(f"unsupported encoding schema version: {version}")
     return version
 

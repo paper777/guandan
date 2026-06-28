@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
+import queue
 import random
 import threading
 import time
@@ -21,13 +23,19 @@ from training.encode import (
 )
 from training.heuristic import HeuristicPolicy
 from training.model import (
-    CONCAT_MLP_ARCHITECTURE,
     DEFAULT_MODEL_ARCHITECTURE,
     build_candidate_actor_critic,
     pair_feature_dim,
     require_torch,
 )
-from training.rollout import RolloutDecision, RolloutResult, RolloutTransition, collect_rollout
+from training.rollout import (
+    RolloutDecision,
+    RolloutEncodedFeatures,
+    RolloutProfile,
+    RolloutResult,
+    RolloutTransition,
+    collect_rollout,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +59,13 @@ class PpoConfig:
     normalize_advantages: bool = True
     hidden_dim: int = 256
     dropout: float = 0.0
-    model_architecture: str | None = None
-    centralized_critic: bool | None = None
     opponent_pool: tuple[str, ...] = ("self",)
     opponent_checkpoint_paths: tuple[Path, ...] = ()
     rollout_workers: int = 1
+    rollout_processes: int = 0
+    inference_batch_size: int = 1
+    inference_batch_wait_ms: float = 1.0
+    candidate_bucket_batches: bool = True
     reward_shaping_start: float = 0.02
     reward_shaping_end: float = 0.0
     seed: int = 1
@@ -78,13 +88,19 @@ class RolloutMetrics:
     completed_deals: int
     steps: int
     stopped_reasons: dict[str, int]
+    profile: RolloutProfile
 
 
 @dataclass(frozen=True, slots=True)
-class CheckpointTrainingMetadata:
-    schema_version: str
-    model_architecture: str | None
-    centralized_critic: bool | None
+class PolicyInferenceProfile:
+    requests: int = 0
+    batches: int = 0
+    max_batch_size: int = 0
+    inference_seconds: float = 0.0
+
+    @property
+    def average_batch_size(self) -> float:
+        return self.requests / self.batches if self.batches else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,24 +113,33 @@ class RolloutJob:
     reward_shaping_weight: float
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessRolloutJob:
+    seed: str
+    max_deals: int
+    max_steps: int
+    record_seats: frozenset[Seat] | None
+    reward_shaping_weight: float
+    current_policy_seats: frozenset[Seat]
+    opponent_name: str
+    opponent_checkpoint_path: Path | None = None
+    opponent_device_name: str = "cpu"
+    schema_version: str = ENCODING_SCHEMA_VERSION
+    centralized_critic: bool = True
+
+
 def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
     torch = require_torch()
     torch.manual_seed(config.seed)
     random.seed(config.seed)
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    init_metadata = _checkpoint_metadata_for_training(torch, config.init_policy_path, device)
-    schema_version = init_metadata.schema_version
+    schema_version = _checkpoint_schema_version_for_training(torch, config.init_policy_path, device)
     observation_dim, action_dim, critic_observation_dim, critic_observation_names = _initial_dimensions(
         config.rollout_seeds[0],
         schema_version=schema_version,
     )
-    model_architecture = config.model_architecture or init_metadata.model_architecture or DEFAULT_MODEL_ARCHITECTURE
-    centralized_critic = (
-        config.centralized_critic
-        if config.centralized_critic is not None
-        else init_metadata.centralized_critic
-    )
-    value_input_dim = critic_observation_dim if centralized_critic else observation_dim
+    model_architecture = DEFAULT_MODEL_ARCHITECTURE
+    value_input_dim = critic_observation_dim
     model = build_candidate_actor_critic(
         pair_feature_dim(observation_dim, action_dim),
         observation_dim,
@@ -122,7 +147,6 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
         value_input_dim=value_input_dim,
         hidden_dim=config.hidden_dim,
         dropout=config.dropout,
-        architecture=model_architecture,
     ).to(device)
     init_checkpoint_kind: str | None = None
     if config.init_policy_path is not None:
@@ -135,8 +159,6 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             config.hidden_dim,
             device,
             schema_version,
-            model_architecture,
-            centralized_critic,
             value_input_dim,
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
@@ -154,8 +176,11 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             f"max_steps={config.max_steps_per_seed} batch_size={config.batch_size} lr={config.learning_rate:g} "
             f"gamma={config.gamma:g} gae_lambda={config.gae_lambda:g} clip={config.clip_epsilon:g} "
             f"entropy_coef={config.entropy_coef:g} target_kl={config.target_kl:g} "
-            f"architecture={model_architecture} centralized_critic={centralized_critic} "
+            f"architecture={model_architecture} centralized_critic=True "
             f"opponents={','.join(config.opponent_pool)} rollout_workers={config.rollout_workers} "
+            f"rollout_processes={config.rollout_processes} "
+            f"inference_batch={config.inference_batch_size}@{config.inference_batch_wait_ms:g}ms "
+            f"candidate_buckets={'on' if config.candidate_bucket_batches else 'off'} "
             f"reward_shaping={config.reward_shaping_start:g}->{config.reward_shaping_end:g}{init_note}",
             flush=True,
         )
@@ -163,21 +188,57 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
     for update_index in range(config.updates):
         update_started_at = time.perf_counter()
         rollout_started_at = update_started_at
-        policy = TorchRolloutPolicy(torch, model, device, schema_version, centralized_critic=centralized_critic)
         shaping_weight = _linear_decay(
             config.reward_shaping_start,
             config.reward_shaping_end,
             update_index,
             max(config.updates, 1),
         )
-        rollout_jobs = _rollout_jobs_for_update(
-            config,
-            policy,
-            update_index=update_index,
-            device_name=str(device),
-            reward_shaping_weight=shaping_weight,
-        )
-        rollouts = _collect_rollout_jobs(rollout_jobs, workers=config.rollout_workers)
+        was_training = model.training
+        model.eval()
+        try:
+            if config.rollout_processes > 0:
+                process_jobs = _rollout_process_jobs_for_update(
+                    config,
+                    update_index=update_index,
+                    device_name=str(device),
+                    reward_shaping_weight=shaping_weight,
+                    schema_version=schema_version,
+                )
+                rollouts, inference_profile = _collect_rollout_process_jobs(
+                    process_jobs,
+                    processes=config.rollout_processes,
+                    torch=torch,
+                    model=model,
+                    device=device,
+                    inference_batch_size=config.inference_batch_size,
+                    inference_batch_wait_ms=config.inference_batch_wait_ms,
+                )
+            else:
+                policy = TorchRolloutPolicy(
+                    torch,
+                    model,
+                    device,
+                    schema_version,
+                    centralized_critic=True,
+                    inference_batch_size=config.inference_batch_size,
+                    inference_batch_wait_ms=config.inference_batch_wait_ms,
+                )
+                rollout_jobs = _rollout_jobs_for_update(
+                    config,
+                    policy,
+                    update_index=update_index,
+                    device_name=str(device),
+                    reward_shaping_weight=shaping_weight,
+                )
+                try:
+                    rollouts = _collect_rollout_jobs(rollout_jobs, workers=config.rollout_workers)
+                finally:
+                    policy.close()
+                inference_profile = policy.inference_profile()
+        finally:
+            if was_training:
+                model.train()
         for rollout in rollouts:
             if rollout.stopped_reason not in {"max_deals", "match_complete"}:
                 raise RuntimeError(f"rollout stopped unexpectedly: {rollout.stopped_reason}")
@@ -198,7 +259,9 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
                 f"seeds={len(rollouts)} transitions={len(transitions)} "
                 f"deals={rollout_metrics.completed_deals} steps={rollout_metrics.steps} "
                 f"stops={_format_stop_counts(rollout_metrics.stopped_reasons)} "
-                f"mean_return={mean_return:.4f} elapsed={rollout_elapsed:.2f}s",
+                f"mean_return={mean_return:.4f} elapsed={rollout_elapsed:.2f}s "
+                f"profile={_format_rollout_profile(rollout_metrics.profile)} "
+                f"inference={_format_policy_inference_profile(inference_profile)}",
                 flush=True,
             )
         mean_kl = 0.0
@@ -208,11 +271,22 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             indices = list(range(len(transitions)))
             train_started_at = time.perf_counter()
             for epoch_index in range(config.epochs_per_update):
-                random.Random(f"{config.seed}:{update_index}:{epoch_index}").shuffle(indices)
+                epoch_rng = random.Random(f"{config.seed}:{update_index}:{epoch_index}")
+                if config.candidate_bucket_batches:
+                    batch_iterator = _iter_candidate_bucket_batches(
+                        transitions,
+                        indices,
+                        config.batch_size,
+                        epoch_rng,
+                    )
+                else:
+                    epoch_indices = list(indices)
+                    epoch_rng.shuffle(epoch_indices)
+                    batch_iterator = _iter_batches(epoch_indices, config.batch_size)
                 total_loss = 0.0
                 total_kl = 0.0
                 batches = 0
-                for batch_indices in _iter_batches(indices, config.batch_size):
+                for batch_indices in batch_iterator:
                     batch_transitions = tuple(transitions[index] for index in batch_indices)
                     batch_returns = tuple(returns[index] for index in batch_indices)
                     batch_advantages = tuple(advantages[index] for index in batch_indices)
@@ -224,7 +298,6 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
                         batch_advantages,
                         config,
                         device,
-                        centralized_critic=centralized_critic,
                     )
                     optimizer.zero_grad()
                     loss.backward()
@@ -266,12 +339,12 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             "observation_dim": observation_dim,
             "action_dim": action_dim,
             "critic_observation_dim": value_input_dim,
-            "critic_observation_names": critic_observation_names if centralized_critic else (),
+            "critic_observation_names": critic_observation_names,
             "encoding_schema": encoding_schema(schema_version),
             "hidden_dim": config.hidden_dim,
             "dropout": config.dropout,
             "model_architecture": model_architecture,
-            "centralized_critic": centralized_critic,
+            "centralized_critic": True,
             "updates": config.updates,
             "transitions": total_transitions,
             "final_loss": final_loss,
@@ -285,11 +358,15 @@ def train_self_play_ppo(config: PpoConfig) -> PpoSummary:
             "max_grad_norm": config.max_grad_norm,
             "target_kl": config.target_kl,
             "normalize_advantages": config.normalize_advantages,
-            "opponent_pool": config.opponent_pool,
-            "opponent_checkpoint_paths": tuple(str(path) for path in config.opponent_checkpoint_paths),
-            "rollout_workers": config.rollout_workers,
-            "reward_shaping_start": config.reward_shaping_start,
-            "reward_shaping_end": config.reward_shaping_end,
+              "opponent_pool": config.opponent_pool,
+              "opponent_checkpoint_paths": tuple(str(path) for path in config.opponent_checkpoint_paths),
+              "rollout_workers": config.rollout_workers,
+              "rollout_processes": config.rollout_processes,
+              "inference_batch_size": config.inference_batch_size,
+              "inference_batch_wait_ms": config.inference_batch_wait_ms,
+              "candidate_bucket_batches": config.candidate_bucket_batches,
+              "reward_shaping_start": config.reward_shaping_start,
+              "reward_shaping_end": config.reward_shaping_end,
             "init_policy_path": str(config.init_policy_path) if config.init_policy_path else None,
             "init_checkpoint_kind": init_checkpoint_kind,
         },
@@ -313,14 +390,26 @@ class TorchRolloutPolicy:
         device,
         schema_version: str = ENCODING_SCHEMA_VERSION,
         *,
-        centralized_critic: bool = False,
+        centralized_critic: bool = True,
+        inference_batch_size: int = 1,
+        inference_batch_wait_ms: float = 1.0,
     ) -> None:
         self.torch = torch
         self.model = model
         self.device = device
         self.schema_version = schema_version
         self.centralized_critic = centralized_critic
-        self._lock = threading.Lock()
+        self._runner = (
+            _BatchedPolicyInferenceRunner(
+                torch,
+                model,
+                device,
+                max_batch_size=inference_batch_size,
+                batch_wait_seconds=max(inference_batch_wait_ms, 0.0) / 1000.0,
+            )
+            if inference_batch_size > 1
+            else None
+        )
 
     def choose_decision(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...]) -> RolloutDecision:
         return self.choose_decision_with_state(snapshot, actions, None)
@@ -331,29 +420,330 @@ class TorchRolloutPolicy:
         actions: tuple[ActionCandidate, ...],
         state,
     ) -> RolloutDecision:
-        with self._lock:
-            was_training = self.model.training
-            self.model.eval()
-            try:
-                with self.torch.no_grad():
-                    logits, value = _policy_logits_and_value(
-                        self.torch,
-                        self.model,
-                        snapshot,
-                        actions,
-                        self.device,
-                        self.schema_version,
-                        centralized_critic=self.centralized_critic,
-                        state=state,
-                    )
-                    distribution = self.torch.distributions.Categorical(logits=logits)
-                    index = int(distribution.sample().item())
-                    log_prob = float(distribution.log_prob(self.torch.tensor(index, device=self.device)).detach().cpu())
-                    value_item = float(value.detach().cpu())
-            finally:
-                if was_training:
-                    self.model.train()
-        return RolloutDecision(actions[index], index, log_prob=log_prob, value=value_item)
+        policy_input = _encode_policy_input(
+            snapshot,
+            actions,
+            self.schema_version,
+            centralized_critic=self.centralized_critic,
+            state=state,
+        )
+        if self._runner is not None:
+            output = self._runner.submit(policy_input)
+        else:
+            inference_mode = getattr(self.torch, "inference_mode", self.torch.no_grad)
+            with inference_mode():
+                output = _infer_policy_batch(self.torch, self.model, (policy_input,), self.device)[0]
+        return RolloutDecision(
+            actions[output.action_index],
+            output.action_index,
+            log_prob=output.log_prob,
+            value=output.value,
+            encoded_features=policy_input.encoded_features,
+        )
+
+    def close(self) -> None:
+        if self._runner is not None:
+            self._runner.close()
+
+    def inference_profile(self) -> PolicyInferenceProfile:
+        if self._runner is None:
+            return PolicyInferenceProfile()
+        return self._runner.profile()
+
+
+@dataclass(frozen=True, slots=True)
+class _PolicyInferenceInput:
+    observation_values: tuple[float, ...]
+    action_values: tuple[tuple[float, ...], ...]
+    value_input_values: tuple[float, ...]
+    encoded_features: RolloutEncodedFeatures
+
+
+@dataclass(frozen=True, slots=True)
+class _PolicyInferenceOutput:
+    action_index: int
+    log_prob: float
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class _PolicyInferenceRequest:
+    policy_input: _PolicyInferenceInput
+    future: object
+
+
+class _BatchedPolicyInferenceRunner:
+    _STOP = object()
+
+    def __init__(self, torch, model, device, *, max_batch_size: int, batch_wait_seconds: float) -> None:
+        self.torch = torch
+        self.model = model
+        self.device = device
+        self.max_batch_size = max(max_batch_size, 1)
+        self.batch_wait_seconds = max(batch_wait_seconds, 0.0)
+        self._queue: queue.Queue[object] = queue.Queue()
+        self._closed = False
+        self._profile_lock = threading.Lock()
+        self._profile = PolicyInferenceProfile()
+        self._thread = threading.Thread(target=self._run, name="guandan-ppo-inference", daemon=True)
+        self._thread.start()
+
+    def submit(self, policy_input: _PolicyInferenceInput) -> _PolicyInferenceOutput:
+        if self._closed:
+            raise RuntimeError("batched policy inference runner is closed")
+        future = _SimpleFuture()
+        self._queue.put(_PolicyInferenceRequest(policy_input, future))
+        return future.result()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._queue.put(self._STOP)
+        self._thread.join()
+
+    def profile(self) -> PolicyInferenceProfile:
+        with self._profile_lock:
+            return self._profile
+
+    def _run(self) -> None:
+        inference_mode = getattr(self.torch, "inference_mode", self.torch.no_grad)
+        stop_after_batch = False
+        while True:
+            item = self._queue.get()
+            if item is self._STOP:
+                return
+            batch = [item]
+            deadline = time.perf_counter() + self.batch_wait_seconds
+            while len(batch) < self.max_batch_size:
+                timeout = deadline - time.perf_counter()
+                if timeout <= 0.0:
+                    break
+                try:
+                    item = self._queue.get(timeout=timeout)
+                except queue.Empty:
+                    break
+                if item is self._STOP:
+                    stop_after_batch = True
+                    break
+                batch.append(item)
+            self._process_batch(batch, inference_mode)
+            if stop_after_batch:
+                return
+
+    def _process_batch(self, batch: list[object], inference_mode) -> None:
+        requests = [item for item in batch if isinstance(item, _PolicyInferenceRequest)]
+        if not requests:
+            return
+        started_at = time.perf_counter()
+        try:
+            with inference_mode():
+                outputs = _infer_policy_batch(
+                    self.torch,
+                    self.model,
+                    tuple(request.policy_input for request in requests),
+                    self.device,
+                )
+        except Exception as exc:
+            for request in requests:
+                request.future.set_exception(exc)
+            return
+        elapsed = time.perf_counter() - started_at
+        self._record_batch(len(requests), elapsed)
+        for request, output in zip(requests, outputs):
+            request.future.set_result(output)
+
+    def _record_batch(self, batch_size: int, elapsed: float) -> None:
+        with self._profile_lock:
+            previous = self._profile
+            self._profile = PolicyInferenceProfile(
+                requests=previous.requests + batch_size,
+                batches=previous.batches + 1,
+                max_batch_size=max(previous.max_batch_size, batch_size),
+                inference_seconds=previous.inference_seconds + elapsed,
+            )
+
+
+class _SimpleFuture:
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._result: object | None = None
+        self._exception: BaseException | None = None
+
+    def set_result(self, result: object) -> None:
+        self._result = result
+        self._event.set()
+
+    def set_exception(self, exception: BaseException) -> None:
+        self._exception = exception
+        self._event.set()
+
+    def result(self) -> _PolicyInferenceOutput:
+        self._event.wait()
+        if self._exception is not None:
+            raise self._exception
+        if not isinstance(self._result, _PolicyInferenceOutput):
+            raise RuntimeError("policy inference returned an invalid result")
+        return self._result
+
+
+@dataclass(frozen=True, slots=True)
+class _RemoteInferenceRequest:
+    response_id: int
+    request_id: int
+    policy_input: _PolicyInferenceInput
+
+
+@dataclass(frozen=True, slots=True)
+class _RemoteInferenceResponse:
+    request_id: int
+    output: _PolicyInferenceOutput | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ProcessRolloutMessage:
+    index: int
+    result: RolloutResult | None = None
+    error: str | None = None
+
+
+class _MultiprocessPolicyInferenceServer:
+    def __init__(
+        self,
+        *,
+        torch,
+        model,
+        device,
+        request_queue,
+        response_queues: dict[int, object],
+        max_batch_size: int,
+        batch_wait_seconds: float,
+    ) -> None:
+        self.torch = torch
+        self.model = model
+        self.device = device
+        self.request_queue = request_queue
+        self.response_queues = response_queues
+        self.max_batch_size = max(max_batch_size, 1)
+        self.batch_wait_seconds = max(batch_wait_seconds, 0.0)
+        self._profile_lock = threading.Lock()
+        self._profile = PolicyInferenceProfile()
+        self._thread = threading.Thread(target=self._run, name="guandan-ppo-mp-inference", daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        self.request_queue.put(None)
+        self._thread.join()
+
+    def profile(self) -> PolicyInferenceProfile:
+        with self._profile_lock:
+            return self._profile
+
+    def _run(self) -> None:
+        inference_mode = getattr(self.torch, "inference_mode", self.torch.no_grad)
+        stop_after_batch = False
+        while True:
+            item = self.request_queue.get()
+            if item is None:
+                return
+            batch = [item]
+            deadline = time.perf_counter() + self.batch_wait_seconds
+            while len(batch) < self.max_batch_size:
+                timeout = deadline - time.perf_counter()
+                if timeout <= 0.0:
+                    break
+                try:
+                    item = self.request_queue.get(timeout=timeout)
+                except queue.Empty:
+                    break
+                if item is None:
+                    stop_after_batch = True
+                    break
+                batch.append(item)
+            self._process_batch(batch, inference_mode)
+            if stop_after_batch:
+                return
+
+    def _process_batch(self, batch: list[object], inference_mode) -> None:
+        requests = [item for item in batch if isinstance(item, _RemoteInferenceRequest)]
+        if not requests:
+            return
+        started_at = time.perf_counter()
+        try:
+            with inference_mode():
+                outputs = _infer_policy_batch(
+                    self.torch,
+                    self.model,
+                    tuple(request.policy_input for request in requests),
+                    self.device,
+                )
+        except Exception as exc:
+            for request in requests:
+                self._respond(request, _RemoteInferenceResponse(request.request_id, error=f"{type(exc).__name__}: {exc}"))
+            return
+        elapsed = time.perf_counter() - started_at
+        self._record_batch(len(requests), elapsed)
+        for request, output in zip(requests, outputs):
+            self._respond(request, _RemoteInferenceResponse(request.request_id, output=output))
+
+    def _respond(self, request: _RemoteInferenceRequest, response: _RemoteInferenceResponse) -> None:
+        response_queue = self.response_queues.get(request.response_id)
+        if response_queue is None:
+            return
+        response_queue.put(response)
+
+    def _record_batch(self, batch_size: int, elapsed: float) -> None:
+        with self._profile_lock:
+            previous = self._profile
+            self._profile = PolicyInferenceProfile(
+                requests=previous.requests + batch_size,
+                batches=previous.batches + 1,
+                max_batch_size=max(previous.max_batch_size, batch_size),
+                inference_seconds=previous.inference_seconds + elapsed,
+            )
+
+
+class _RemoteCurrentPolicy:
+    def __init__(self, request_queue, response_queue, response_id: int, schema_version: str, *, centralized_critic: bool) -> None:
+        self.request_queue = request_queue
+        self.response_queue = response_queue
+        self.response_id = response_id
+        self.schema_version = schema_version
+        self.centralized_critic = centralized_critic
+        self._next_request_id = 0
+
+    def choose_decision(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...]) -> RolloutDecision:
+        return self.choose_decision_with_state(snapshot, actions, None)
+
+    def choose_decision_with_state(self, snapshot: SeatSnapshot, actions: tuple[ActionCandidate, ...], state) -> RolloutDecision:
+        policy_input = _encode_policy_input(
+            snapshot,
+            actions,
+            self.schema_version,
+            centralized_critic=self.centralized_critic,
+            state=state,
+        )
+        request_id = self._next_request_id
+        self._next_request_id += 1
+        self.request_queue.put(_RemoteInferenceRequest(self.response_id, request_id, policy_input))
+        response = self.response_queue.get()
+        if not isinstance(response, _RemoteInferenceResponse):
+            raise RuntimeError("remote policy inference returned an invalid response")
+        if response.request_id != request_id:
+            raise RuntimeError("remote policy inference response id mismatch")
+        if response.error is not None:
+            raise RuntimeError(response.error)
+        if response.output is None:
+            raise RuntimeError("remote policy inference returned no output")
+        output = response.output
+        return RolloutDecision(
+            actions[output.action_index],
+            output.action_index,
+            log_prob=output.log_prob,
+            value=output.value,
+            encoded_features=policy_input.encoded_features,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -384,14 +774,16 @@ def main(argv: list[str] | None = None) -> int:
             normalize_advantages=not args.no_normalize_advantages,
             hidden_dim=args.hidden_dim,
             dropout=args.dropout,
-            model_architecture=args.model_architecture,
-            centralized_critic=args.centralized_critic,
-            opponent_pool=tuple(args.opponent_pool.split(",")) if args.opponent_pool else (),
-            opponent_checkpoint_paths=tuple(Path(path) for path in (args.opponent_checkpoint or ())),
-            rollout_workers=args.rollout_workers,
-            reward_shaping_start=args.reward_shaping_start,
-            reward_shaping_end=args.reward_shaping_end,
-            seed=args.torch_seed,
+              opponent_pool=tuple(args.opponent_pool.split(",")) if args.opponent_pool else (),
+              opponent_checkpoint_paths=tuple(Path(path) for path in (args.opponent_checkpoint or ())),
+              rollout_workers=args.rollout_workers,
+              rollout_processes=args.rollout_processes,
+              inference_batch_size=args.inference_batch_size,
+              inference_batch_wait_ms=args.inference_batch_wait_ms,
+              candidate_bucket_batches=not args.no_candidate_bucket_batches,
+              reward_shaping_start=args.reward_shaping_start,
+              reward_shaping_end=args.reward_shaping_end,
+              seed=args.torch_seed,
             device=args.device,
             log_updates=not args.quiet,
         )
@@ -418,8 +810,6 @@ def _initialize_model_from_checkpoint(
     hidden_dim: int,
     device,
     schema_version: str,
-    model_architecture: str,
-    centralized_critic: bool,
     value_input_dim: int,
 ) -> str:
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -429,8 +819,6 @@ def _initialize_model_from_checkpoint(
         action_dim,
         hidden_dim,
         schema_version=schema_version,
-        model_architecture=model_architecture,
-        centralized_critic=centralized_critic,
         value_input_dim=value_input_dim,
     )
     if kind == "ppo":
@@ -464,9 +852,7 @@ def _initial_model_state_from_checkpoint(
     action_dim: int,
     hidden_dim: int,
     *,
-    schema_version: str | None = None,
-    model_architecture: str | None = None,
-    centralized_critic: bool | None = None,
+    schema_version: str = ENCODING_SCHEMA_VERSION,
     value_input_dim: int | None = None,
 ) -> tuple[str, dict[str, object]]:
     if not isinstance(checkpoint, dict):
@@ -475,27 +861,16 @@ def _initial_model_state_from_checkpoint(
     _validate_checkpoint_dim(checkpoint, "action_dim", action_dim)
     _validate_checkpoint_dim(checkpoint, "hidden_dim", hidden_dim)
     validate_encoding_schema(checkpoint, schema_version=schema_version)
-    if model_architecture is not None:
-        checkpoint_architecture = _checkpoint_model_architecture(checkpoint)
-        if checkpoint_architecture != model_architecture:
-            raise ValueError(
-                f"initial checkpoint model_architecture={checkpoint_architecture!r} "
-                f"does not match PPO model_architecture={model_architecture!r}"
-            )
-    if centralized_critic is not None and _checkpoint_is_ppo(checkpoint):
-        checkpoint_centralized = _checkpoint_centralized_critic(checkpoint)
-        if checkpoint_centralized != centralized_critic:
-            raise ValueError(
-                f"initial checkpoint centralized_critic={checkpoint_centralized!r} "
-                f"does not match PPO centralized_critic={centralized_critic!r}"
-            )
-        if value_input_dim is not None:
-            expected_key = "critic_observation_dim" if checkpoint_centralized else "observation_dim"
-            _validate_checkpoint_dim(checkpoint, expected_key, value_input_dim)
+    _validate_checkpoint_architecture(checkpoint)
     model_state = checkpoint.get("model_state")
     if not isinstance(model_state, dict):
         raise ValueError("initial checkpoint is missing model_state")
     if _model_state_is_ppo(model_state):
+        if checkpoint.get("centralized_critic") is not True:
+            raise ValueError("initial PPO checkpoint must use centralized_critic=True")
+        if value_input_dim is None:
+            raise ValueError("value_input_dim is required for PPO checkpoint initialization")
+        _validate_checkpoint_dim(checkpoint, "critic_observation_dim", value_input_dim)
         return "ppo", model_state
     policy_state = _bc_ranker_state_to_policy_state(model_state)
     if policy_state:
@@ -509,27 +884,21 @@ def _validate_checkpoint_dim(checkpoint: dict[str, object], key: str, expected: 
         raise ValueError(f"initial checkpoint {key}={actual!r} does not match PPO {key}={expected!r}")
 
 
+def _validate_checkpoint_architecture(checkpoint: dict[str, object]) -> None:
+    actual = checkpoint.get("model_architecture")
+    if actual != DEFAULT_MODEL_ARCHITECTURE:
+        raise ValueError(
+            f"initial checkpoint model_architecture={actual!r} "
+            f"does not match PPO model_architecture={DEFAULT_MODEL_ARCHITECTURE!r}"
+        )
+
+
 def _bc_ranker_state_to_policy_state(model_state: dict[str, object]) -> dict[str, object]:
-    net_state = {
-        str(key).removeprefix("net."): value
-        for key, value in model_state.items()
-        if str(key).startswith("net.")
-    }
-    if net_state:
-        return net_state
     return {
         str(key).removeprefix("policy_net."): value
         for key, value in model_state.items()
-        if str(key).startswith("policy_net.")
+        if str(key).startswith("policy_net.") and not str(key).startswith("policy_net.value_net.")
     }
-
-
-def _checkpoint_model_architecture(checkpoint: dict[str, object]) -> str:
-    return str(checkpoint.get("model_architecture") or CONCAT_MLP_ARCHITECTURE)
-
-
-def _checkpoint_centralized_critic(checkpoint: dict[str, object]) -> bool:
-    return bool(checkpoint.get("centralized_critic", False))
 
 
 def _checkpoint_is_ppo(checkpoint: dict[str, object]) -> bool:
@@ -551,6 +920,7 @@ def _rollout_metrics(rollouts: list[RolloutResult]) -> RolloutMetrics:
         completed_deals=sum(rollout.completed_deals for rollout in rollouts),
         steps=sum(rollout.steps for rollout in rollouts),
         stopped_reasons=stopped_reasons,
+        profile=_sum_rollout_profiles(rollouts),
     )
 
 
@@ -558,6 +928,46 @@ def _format_stop_counts(stopped_reasons: dict[str, int]) -> str:
     if not stopped_reasons:
         return "none"
     return ",".join(f"{reason}:{count}" for reason, count in sorted(stopped_reasons.items()))
+
+
+def _sum_rollout_profiles(rollouts: list[RolloutResult]) -> RolloutProfile:
+    return RolloutProfile(
+        decisions=sum(rollout.profile.decisions for rollout in rollouts),
+        recorded_transitions=sum(rollout.profile.recorded_transitions for rollout in rollouts),
+        candidate_count_total=sum(rollout.profile.candidate_count_total for rollout in rollouts),
+        candidate_count_max=max((rollout.profile.candidate_count_max for rollout in rollouts), default=0),
+        encoded_transition_reuses=sum(rollout.profile.encoded_transition_reuses for rollout in rollouts),
+        encoded_transition_misses=sum(rollout.profile.encoded_transition_misses for rollout in rollouts),
+        legal_action_seconds=sum(rollout.profile.legal_action_seconds for rollout in rollouts),
+        policy_seconds=sum(rollout.profile.policy_seconds for rollout in rollouts),
+        critic_encode_seconds=sum(rollout.profile.critic_encode_seconds for rollout in rollouts),
+        transition_encode_seconds=sum(rollout.profile.transition_encode_seconds for rollout in rollouts),
+        env_step_seconds=sum(rollout.profile.env_step_seconds for rollout in rollouts),
+    )
+
+
+def _format_rollout_profile(profile: RolloutProfile) -> str:
+    if profile.decisions == 0:
+        return "none"
+    return (
+        f"legal={profile.legal_action_seconds:.2f}s "
+        f"policy={profile.policy_seconds:.2f}s "
+        f"critic={profile.critic_encode_seconds:.2f}s "
+        f"transition={profile.transition_encode_seconds:.2f}s "
+        f"step={profile.env_step_seconds:.2f}s "
+        f"candidates={profile.average_candidate_count:.1f}/{profile.candidate_count_max} "
+        f"encoded_reuse={profile.encoded_transition_reuses}/{profile.recorded_transitions}"
+    )
+
+
+def _format_policy_inference_profile(profile: PolicyInferenceProfile) -> str:
+    if profile.requests == 0:
+        return "direct"
+    return (
+        f"requests={profile.requests} batches={profile.batches} "
+        f"avg_batch={profile.average_batch_size:.1f} max_batch={profile.max_batch_size} "
+        f"forward={profile.inference_seconds:.2f}s"
+    )
 
 
 def _rollout_jobs_for_update(
@@ -604,6 +1014,55 @@ def _rollout_jobs_for_update(
     return jobs
 
 
+def _rollout_process_jobs_for_update(
+    config: PpoConfig,
+    *,
+    update_index: int,
+    device_name: str,
+    reward_shaping_weight: float,
+    schema_version: str,
+) -> list[ProcessRolloutJob]:
+    opponents = _opponent_specs(config, device_name=device_name)
+    jobs: list[ProcessRolloutJob] = []
+    all_current_seats = frozenset(SEATS)
+    for seed in config.rollout_seeds:
+        base_seed = f"{seed}:update:{update_index}"
+        for opponent_name, checkpoint_path, opponent_device_name in opponents:
+            if opponent_name == "self":
+                jobs.append(
+                    ProcessRolloutJob(
+                        seed=f"{base_seed}:self",
+                        max_deals=config.max_deals_per_seed,
+                        max_steps=config.max_steps_per_seed,
+                        record_seats=None,
+                        reward_shaping_weight=reward_shaping_weight,
+                        current_policy_seats=all_current_seats,
+                        opponent_name="self",
+                        opponent_checkpoint_path=None,
+                        opponent_device_name=opponent_device_name,
+                        schema_version=schema_version,
+                    )
+                )
+                continue
+            for candidate_team in (Team.EAST_WEST, Team.SOUTH_NORTH):
+                current_policy_seats = frozenset(seat for seat in SEATS if team_for_seat(seat) == candidate_team)
+                jobs.append(
+                    ProcessRolloutJob(
+                        seed=f"{base_seed}:{opponent_name}:{candidate_team.value}",
+                        max_deals=config.max_deals_per_seed,
+                        max_steps=config.max_steps_per_seed,
+                        record_seats=current_policy_seats,
+                        reward_shaping_weight=reward_shaping_weight,
+                        current_policy_seats=current_policy_seats,
+                        opponent_name=opponent_name,
+                        opponent_checkpoint_path=checkpoint_path,
+                        opponent_device_name=opponent_device_name,
+                        schema_version=schema_version,
+                    )
+                )
+    return jobs
+
+
 def _collect_rollout_jobs(jobs: list[RolloutJob], *, workers: int) -> list[RolloutResult]:
     if workers <= 1 or len(jobs) <= 1:
         return [_collect_rollout_job(job) for job in jobs]
@@ -619,30 +1078,206 @@ def _collect_rollout_job(job: RolloutJob) -> RolloutResult:
         max_steps=job.max_steps,
         record_seats=job.record_seats,
         reward_shaping_weight=job.reward_shaping_weight,
+      )
+
+
+def _collect_rollout_process_jobs(
+    jobs: list[ProcessRolloutJob],
+    *,
+    processes: int,
+    torch,
+    model,
+    device,
+    inference_batch_size: int,
+    inference_batch_wait_ms: float,
+) -> tuple[list[RolloutResult], PolicyInferenceProfile]:
+    if not jobs:
+        return [], PolicyInferenceProfile()
+    process_count = max(1, min(processes, len(jobs)))
+    context = mp.get_context("spawn")
+    request_queue = context.Queue()
+    result_queue = context.Queue()
+    response_queues = {index: context.Queue() for index in range(len(jobs))}
+    server = _MultiprocessPolicyInferenceServer(
+        torch=torch,
+        model=model,
+        device=device,
+        request_queue=request_queue,
+        response_queues=response_queues,
+        max_batch_size=inference_batch_size,
+        batch_wait_seconds=max(inference_batch_wait_ms, 0.0) / 1000.0,
     )
+    active: dict[int, object] = {}
+    results: list[RolloutResult | None] = [None for _ in jobs]
+    next_index = 0
+    try:
+        next_index = _start_rollout_processes(
+            context,
+            jobs,
+            request_queue,
+            response_queues,
+            result_queue,
+            active,
+            next_index,
+            process_count,
+        )
+        completed = 0
+        while completed < len(jobs):
+            try:
+                message = result_queue.get(timeout=0.1)
+            except queue.Empty:
+                _raise_for_dead_process(active)
+                continue
+            if not isinstance(message, _ProcessRolloutMessage):
+                raise RuntimeError("rollout process returned an invalid message")
+            process = active.pop(message.index, None)
+            if process is not None:
+                process.join()
+            if message.error is not None:
+                raise RuntimeError(message.error)
+            if message.result is None:
+                raise RuntimeError("rollout process returned no result")
+            results[message.index] = message.result
+            completed += 1
+            next_index = _start_rollout_processes(
+                context,
+                jobs,
+                request_queue,
+                response_queues,
+                result_queue,
+                active,
+                next_index,
+                process_count,
+            )
+    except Exception:
+        for process in active.values():
+            if process.is_alive():
+                process.terminate()
+        for process in active.values():
+            process.join()
+        raise
+    finally:
+        server.close()
+    return [result for result in results if result is not None], server.profile()
+
+
+def _start_rollout_processes(
+    context,
+    jobs: list[ProcessRolloutJob],
+    request_queue,
+    response_queues: dict[int, object],
+    result_queue,
+    active: dict[int, object],
+    next_index: int,
+    process_count: int,
+) -> int:
+    while next_index < len(jobs) and len(active) < process_count:
+        response_queue = response_queues[next_index]
+        process = context.Process(
+            target=_collect_rollout_process_entry,
+            args=(next_index, jobs[next_index], request_queue, response_queue, result_queue),
+        )
+        process.start()
+        active[next_index] = process
+        next_index += 1
+    return next_index
+
+
+def _raise_for_dead_process(active: dict[int, object]) -> None:
+    for index, process in tuple(active.items()):
+        if not process.is_alive() and process.exitcode not in {None, 0}:
+            process.join()
+            active.pop(index, None)
+            raise RuntimeError(f"rollout process {index} exited with code {process.exitcode}")
+
+
+def _collect_rollout_process_entry(index: int, job: ProcessRolloutJob, request_queue, response_queue, result_queue) -> None:
+    try:
+        current_policy = _RemoteCurrentPolicy(
+            request_queue,
+            response_queue,
+            index,
+            job.schema_version,
+            centralized_critic=job.centralized_critic,
+        )
+        opponent_policy = _process_opponent_policy(job)
+        policies = {
+            seat: current_policy if seat in job.current_policy_seats else opponent_policy
+            for seat in SEATS
+        }
+        result = collect_rollout(
+            policies,
+            seed=job.seed,
+            max_deals=job.max_deals,
+            max_steps=job.max_steps,
+            record_seats=job.record_seats,
+            reward_shaping_weight=job.reward_shaping_weight,
+        )
+    except Exception as exc:
+        result_queue.put(_ProcessRolloutMessage(index, error=f"{type(exc).__name__}: {exc}"))
+        return
+    result_queue.put(_ProcessRolloutMessage(index, result=result))
+
+
+def _process_opponent_policy(job: ProcessRolloutJob):
+    if job.opponent_name == "self":
+        return _DummyPolicy()
+    if job.opponent_name == "heuristic":
+        return _ActionPolicyRolloutAdapter(HeuristicPolicy())
+    if job.opponent_name == "dummy":
+        return _ActionPolicyRolloutAdapter(_DummyPolicy())
+    if job.opponent_checkpoint_path is not None:
+        return _FrozenCheckpointRolloutPolicy(job.opponent_checkpoint_path, job.opponent_device_name)
+    raise ValueError(f"unsupported process opponent: {job.opponent_name}")
 
 
 def _opponent_policies(config: PpoConfig, *, device_name: str) -> list[tuple[str, object]]:
-    tokens = tuple(token.strip() for item in config.opponent_pool for token in item.split(",") if token.strip())
-    if not tokens:
-        tokens = ("self",)
     opponents: list[tuple[str, object]] = []
-    for token in tokens:
+    for token, checkpoint_path, opponent_device_name in _opponent_specs(
+        config,
+        device_name=device_name,
+        checkpoint_device_name=device_name,
+    ):
         if token == "self":
             opponents.append(("self", object()))
         elif token == "heuristic":
             opponents.append(("heuristic", _ActionPolicyRolloutAdapter(HeuristicPolicy())))
         elif token == "dummy":
             opponents.append(("dummy", _ActionPolicyRolloutAdapter(_DummyPolicy())))
+        elif checkpoint_path is not None:
+            opponents.append((token, _FrozenCheckpointRolloutPolicy(checkpoint_path, opponent_device_name)))
+        else:
+            raise ValueError(f"unsupported opponent pool entry: {token}")
+    return opponents or [("self", object())]
+
+
+def _opponent_specs(
+    config: PpoConfig,
+    *,
+    device_name: str,
+    checkpoint_device_name: str | None = None,
+) -> list[tuple[str, Path | None, str]]:
+    tokens = tuple(token.strip() for item in config.opponent_pool for token in item.split(",") if token.strip())
+    if not tokens:
+        tokens = ("self",)
+    checkpoint_device = (
+        checkpoint_device_name
+        if checkpoint_device_name is not None
+        else "cpu" if str(device_name).startswith("cuda") else device_name
+    )
+    opponents: list[tuple[str, Path | None, str]] = []
+    for token in tokens:
+        if token in {"self", "heuristic", "dummy"}:
+            opponents.append((token, None, checkpoint_device))
         elif token == "previous" and config.init_policy_path is not None:
-            opponents.append(("previous", _FrozenCheckpointRolloutPolicy(config.init_policy_path, device_name)))
+            opponents.append(("previous", config.init_policy_path, checkpoint_device))
         elif token == "previous":
             continue
         else:
             raise ValueError(f"unsupported opponent pool entry: {token}")
     for index, path in enumerate(config.opponent_checkpoint_paths):
-        opponents.append((f"checkpoint{index}", _FrozenCheckpointRolloutPolicy(path, device_name)))
-    return opponents or [("self", object())]
+        opponents.append((f"checkpoint{index}", path, checkpoint_device))
+    return opponents
 
 
 class _ActionPolicyRolloutAdapter:
@@ -696,15 +1331,12 @@ def _ppo_batch_loss(
     advantages: tuple[float, ...],
     config: PpoConfig,
     device,
-    *,
-    centralized_critic: bool = False,
 ):
     logits, values, mask = _transition_batch_logits_and_values(
         torch,
         model,
         transitions,
         device,
-        centralized_critic=centralized_critic,
     )
     log_probs = torch.log_softmax(logits, dim=1)
     probs = torch.softmax(logits, dim=1)
@@ -773,21 +1405,42 @@ def _iter_batches(indices: list[int], batch_size: int):
         yield indices[start : start + batch_size]
 
 
-def _checkpoint_metadata_for_training(torch, checkpoint_path: Path | None, device) -> CheckpointTrainingMetadata:
+def _candidate_count_bucket(candidate_count: int) -> int:
+    if candidate_count <= 1:
+        return max(candidate_count, 0)
+    return 1 << (candidate_count - 1).bit_length()
+
+
+def _iter_candidate_bucket_batches(
+    transitions: list[RolloutTransition],
+    indices: list[int],
+    batch_size: int,
+    rng: random.Random,
+):
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    buckets: dict[int, list[int]] = {}
+    for index in indices:
+        bucket = _candidate_count_bucket(len(transitions[index].candidate_values))
+        buckets.setdefault(bucket, []).append(index)
+    bucket_keys = list(buckets)
+    rng.shuffle(bucket_keys)
+    batches: list[list[int]] = []
+    for bucket_key in bucket_keys:
+        bucket_indices = buckets[bucket_key]
+        rng.shuffle(bucket_indices)
+        batches.extend(_iter_batches(bucket_indices, batch_size))
+    rng.shuffle(batches)
+    yield from batches
+
+
+def _checkpoint_schema_version_for_training(torch, checkpoint_path: Path | None, device) -> str:
     if checkpoint_path is None:
-        return CheckpointTrainingMetadata(
-            schema_version=ENCODING_SCHEMA_VERSION,
-            model_architecture=None,
-            centralized_critic=True,
-        )
+        return ENCODING_SCHEMA_VERSION
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if not isinstance(checkpoint, dict):
         raise ValueError("initial checkpoint must be a dictionary")
-    return CheckpointTrainingMetadata(
-        schema_version=validate_encoding_schema(checkpoint),
-        model_architecture=_checkpoint_model_architecture(checkpoint),
-        centralized_critic=_checkpoint_centralized_critic(checkpoint) if _checkpoint_is_ppo(checkpoint) else True,
-    )
+    return validate_encoding_schema(checkpoint)
 
 
 def _initial_dimensions(seed: str, *, schema_version: str = ENCODING_SCHEMA_VERSION) -> tuple[int, int, int, tuple[str, ...]]:
@@ -808,35 +1461,86 @@ def _initial_dimensions(seed: str, *, schema_version: str = ENCODING_SCHEMA_VERS
     return observation_dim, action_dim, len(critic_observation.values), critic_observation.names
 
 
-def _policy_logits_and_value(
-    torch,
-    model,
+def _encode_policy_input(
     snapshot: SeatSnapshot,
     actions: tuple[ActionCandidate, ...],
-    device,
-    schema_version: str = ENCODING_SCHEMA_VERSION,
+    schema_version: str,
     *,
-    centralized_critic: bool = False,
+    centralized_critic: bool = True,
     state=None,
-):
-    observation = torch.tensor(
-        encode_observation(snapshot, schema_version=schema_version).values,
+) -> _PolicyInferenceInput:
+    if not actions:
+        raise ValueError("policy inference requires at least one legal action")
+    observation_vector = encode_observation(snapshot, schema_version=schema_version)
+    action_vectors = tuple(encode_action(action, snapshot, schema_version=schema_version) for action in actions)
+    action_values = tuple(vector.values for vector in action_vectors)
+    if centralized_critic and state is not None:
+        critic_observation = encode_critic_observation(state, snapshot.seat, schema_version=schema_version)
+        value_input_values = critic_observation.values
+        critic_observation_values = critic_observation.values
+    else:
+        value_input_values = observation_vector.values
+        critic_observation_values = ()
+    encoded_features = RolloutEncodedFeatures(
+        observation_names=observation_vector.names,
+        observation_values=observation_vector.values,
+        action_names=action_vectors[0].names if action_vectors else (),
+        candidate_values=action_values,
+        critic_observation_values=critic_observation_values,
+    )
+    return _PolicyInferenceInput(
+        observation_values=observation_vector.values,
+        action_values=action_values,
+        value_input_values=value_input_values,
+        encoded_features=encoded_features,
+    )
+
+
+def _infer_policy_batch(torch, model, inputs: tuple[_PolicyInferenceInput, ...], device) -> tuple[_PolicyInferenceOutput, ...]:
+    if not inputs:
+        return ()
+    logits, values = _policy_batch_logits_and_values(torch, model, inputs, device)
+    distribution = torch.distributions.Categorical(logits=logits)
+    indices = distribution.sample()
+    log_probs = distribution.log_prob(indices)
+    return tuple(
+        _PolicyInferenceOutput(
+            action_index=int(indices[row].item()),
+            log_prob=float(log_probs[row].detach().cpu()),
+            value=float(values[row].detach().cpu()),
+        )
+        for row in range(len(inputs))
+    )
+
+
+def _policy_batch_logits_and_values(torch, model, inputs: tuple[_PolicyInferenceInput, ...], device):
+    if not inputs:
+        raise ValueError("policy batch requires at least one inference input")
+    observations = torch.tensor(
+        [item.observation_values for item in inputs],
         dtype=torch.float32,
         device=device,
     )
-    action_values = [encode_action(action, snapshot, schema_version=schema_version).values for action in actions]
-    action_features = torch.tensor(action_values, dtype=torch.float32, device=device)
-    observations = observation.expand(action_features.shape[0], -1)
-    pair_features = torch.cat((observations, action_features), dim=1)
-    if centralized_critic and state is not None:
-        value_input = torch.tensor(
-            encode_critic_observation(state, snapshot.seat, schema_version=schema_version).values,
-            dtype=torch.float32,
-            device=device,
-        )
-    else:
-        value_input = observation
-    return model.policy_logits(pair_features), model.value(value_input)
+    counts = torch.tensor([len(item.action_values) for item in inputs], dtype=torch.long, device=device)
+    if bool((counts <= 0).any().item()):
+        raise ValueError("policy inference input contains no legal actions")
+    flat_actions = [action_values for item in inputs for action_values in item.action_values]
+    action_features = torch.tensor(flat_actions, dtype=torch.float32, device=device)
+    pair_observations = observations.repeat_interleave(counts, dim=0)
+    flat_logits = model.policy_logits(torch.cat((pair_observations, action_features), dim=1))
+    max_candidates = int(counts.max().item())
+    logits = torch.full((len(inputs), max_candidates), -torch.inf, dtype=torch.float32, device=device)
+    offset = 0
+    for row, count_item in enumerate(counts.tolist()):
+        logits[row, :count_item] = flat_logits[offset : offset + count_item]
+        offset += count_item
+    value_inputs = torch.tensor(
+        [item.value_input_values for item in inputs],
+        dtype=torch.float32,
+        device=device,
+    )
+    values = model.value(value_inputs)
+    return logits, values
 
 
 def _transition_batch_logits_and_values(
@@ -844,8 +1548,6 @@ def _transition_batch_logits_and_values(
     model,
     transitions: tuple[RolloutTransition, ...],
     device,
-    *,
-    centralized_critic: bool = False,
 ):
     observations = torch.tensor(
         [transition.observation_values for transition in transitions],
@@ -873,16 +1575,13 @@ def _transition_batch_logits_and_values(
         offset += count_item
     candidate_positions = torch.arange(max_candidates, device=device).unsqueeze(0)
     mask = candidate_positions < counts.unsqueeze(1)
-    if centralized_critic:
-        if any(not transition.critic_observation_values for transition in transitions):
-            raise ValueError("centralized critic transitions are missing critic observation values")
-        value_inputs = torch.tensor(
-            [transition.critic_observation_values for transition in transitions],
-            dtype=torch.float32,
-            device=device,
-        )
-    else:
-        value_inputs = observations
+    if any(not transition.critic_observation_values for transition in transitions):
+        raise ValueError("centralized critic transitions are missing critic observation values")
+    value_inputs = torch.tensor(
+        [transition.critic_observation_values for transition in transitions],
+        dtype=torch.float32,
+        device=device,
+    )
     return logits, model.value(value_inputs), mask
 
 
@@ -891,7 +1590,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("output", help="Output checkpoint path.")
     parser.add_argument(
         "--init-policy",
-        "--init-model",
         dest="init_policy",
         help="BC ranker or trained PPO actor-critic checkpoint used to initialize PPO training.",
     )
@@ -913,12 +1611,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-normalize-advantages", action="store_true")
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.0)
-    parser.add_argument("--model-architecture", default=None)
-    parser.add_argument("--centralized-critic", dest="centralized_critic", action="store_true", default=None)
-    parser.add_argument("--decentralized-critic", dest="centralized_critic", action="store_false")
     parser.add_argument("--opponent-pool", default="self")
     parser.add_argument("--opponent-checkpoint", action="append")
     parser.add_argument("--rollout-workers", type=int, default=1)
+    parser.add_argument("--rollout-processes", type=int, default=0)
+    parser.add_argument("--inference-batch-size", type=int, default=1)
+    parser.add_argument("--inference-batch-wait-ms", type=float, default=1.0)
+    parser.add_argument("--no-candidate-bucket-batches", action="store_true")
     parser.add_argument("--reward-shaping-start", type=float, default=0.02)
     parser.add_argument("--reward-shaping-end", type=float, default=0.0)
     parser.add_argument("--torch-seed", type=int, default=1)

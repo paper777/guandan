@@ -241,12 +241,12 @@ value = value_head(h)
 guandan-bc-collect data/bc/heuristic.compact.jsonl.gz --seed-count 8 --max-deals 1 --workers 4 --compact
 guandan-bc-cache data/bc/heuristic.compact.jsonl.gz data/bc/heuristic.bc-cache --shard-size 2048
 guandan-bc-train data/bc/heuristic.compact.jsonl.gz data/models/bc_ranker.pt --epochs 3 --validation-fraction 0.1 --cache-dir data/bc/heuristic.bc-cache --batch-size 128
-guandan-ppo-train data/models/ppo_actor_critic.bootstrap.pt --init-policy data/models/bc_ranker.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256
-guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-model data/models/ppo_actor_critic.pt --seed-count 8 --updates 100 --epochs-per-update 3 --max-deals 4 --batch-size 256
+guandan-ppo-train data/models/ppo_actor_critic.next.pt --init-policy data/models/bc_ranker.pt --seed-count 10 --updates 10 --epochs-per-update 3 --max-deals 24 --batch-size 1024 --opponent-pool self,heuristic,previous --rollout-processes 16 --inference-batch-size 16
+guandan-ppo-train data/models/ppo_actor_critic.continue.pt --init-policy data/models/ppo_actor_critic.next.pt --seed-count 10 --updates 10 --epochs-per-update 3 --max-deals 24 --batch-size 1024 --opponent-pool self,heuristic,previous --rollout-processes 16 --inference-batch-size 16
 guandan-rl-agent-server --model-path data/models/ppo_actor_critic.pt --device cuda
 ```
 
-`--init-policy` 和 `--init-model` 指向同一个初始化参数：传入 BC ranker checkpoint 时只初始化 PPO actor，传入 PPO actor-critic checkpoint 时完整恢复 actor 和 critic。持续训练建议写入新的 `.next.pt` checkpoint，固定评测通过后再提升为线上 `data/models/ppo_actor_critic.pt`。
+`--init-policy` 可接收 BC ranker checkpoint 或 PPO actor-critic checkpoint：传入 BC ranker 时只初始化 PPO actor，传入 PPO actor-critic 时完整恢复 actor 和 critic。持续训练建议写入新的 `.next.pt` checkpoint，固定评测通过后再提升为线上 `data/models/ppo_actor_critic.pt`。
 
 `guandan-bc-train`、`guandan-ppo-train` 和 RL agent 模型推理需要安装 PyTorch；当前代码使用惰性导入，所以没有安装训练依赖时仍可运行普通单元测试，RL agent 会 fallback 到启发式策略。
 
@@ -292,7 +292,7 @@ GPU smoke run 记录：
 
 ### Observation 编码
 
-`encode_observation(snapshot)` 采用版本化 schema：旧 checkpoint 使用 `v1` 的 `140` 维 float 特征，当前默认 `v2` 输出 `195` 维 float 特征，全部来自当前座位可见的 `SeatSnapshot`：
+`encode_observation(snapshot)` 采用当前 `v2` schema，输出 `195` 维 float 特征，全部来自当前座位可见的 `SeatSnapshot`：
 
 - 座位、phase、当前级牌、current turn、acting seat、legal action、贡牌来源/目标等 one-hot。
 - 双方等级归一化到 `[0, 1]`。
@@ -312,7 +312,7 @@ GPU smoke run 记录：
 
 ### Action 编码
 
-`encode_action(action, snapshot)` 同样版本化：旧 checkpoint 使用 `v1` 的 `88` 维特征，当前默认 `v2` 输出 `96` 维特征：
+`encode_action(action, snapshot)` 同样采用当前 `v2` schema，输出 `96` 维特征：
 
 - 动作类型 one-hot：`pass`、`play_cards`、`submit_tribute`、`return_tribute`。
 - 出牌牌型 one-hot、主 rank one-hot。
@@ -350,7 +350,7 @@ policy_net: same dual-tower candidate scorer
 value_net:  MLP(critic_observation -> hidden -> hidden -> 1)
 ```
 
-默认新训练使用 `dual_tower_v1`。旧 checkpoint 没有 `model_architecture` 时按 `concat_mlp` 加载，保证 `data/models/ppo_actor_critic.pt` 仍可继续训练。默认 `hidden_dim=256` 时，模型规模仍偏轻量，适合低延迟 smoke run 和线上 fallback 验证，但仍明显小于最初建议的 5M 到 30M 参数区间。
+训练和线上加载统一使用 `dual_tower_v1`。checkpoint 必须携带 `model_architecture=dual_tower_v1`、当前 `encoding_schema` 和匹配的 schema hash；不再保留旧 concat MLP 或无 manifest checkpoint 的兼容路径。默认 `hidden_dim=256` 时，模型规模仍偏轻量，适合低延迟 smoke run 和线上 fallback 验证，但仍明显小于最初建议的 5M 到 30M 参数区间。
 
 当前仍保留的差异：
 
@@ -398,13 +398,13 @@ PPO 当前流程：
 PPO 初始化约束（2026-06-27）：
 
 - `HeuristicPolicy` 只用于 BC 采样、固定评测和线上安全 fallback；PPO rollout actor 必须来自 `TorchRolloutPolicy` 包装的模型。
-- `--init-policy` 保持向后兼容，可接收 BC ranker 或 PPO actor-critic checkpoint；新增同义参数 `--init-model`，用于表达从已训练 PPO 模型继续训练。
-- BC ranker checkpoint 只把 `net.*` 映射到 `policy_net.*`，critic 仍在 PPO 中学习；PPO checkpoint 则完整加载 actor 和 critic，使持续训练基于已训练模型而不是重新依赖启发式教师。
-- checkpoint 保存 `model_architecture`、`centralized_critic` 和 `critic_observation_dim`；旧 checkpoint 缺失这些字段时按 `concat_mlp` 和 decentralized critic 兼容加载。
+- `--init-policy` 可接收当前格式的 BC ranker 或 PPO actor-critic checkpoint；继续 PPO 训练也使用该参数。
+- BC ranker checkpoint 使用当前 `policy_net.*` state 初始化 PPO actor，critic 仍在 PPO 中学习；PPO checkpoint 则完整加载 actor 和 critic，使持续训练基于已训练模型而不是重新依赖启发式教师。
+- checkpoint 必须保存 `model_architecture`、`centralized_critic=True`、`critic_observation_dim` 和当前 `encoding_schema`；缺失这些字段的旧 checkpoint 不再加载。
 
 当前 PPO 是可运行 scaffold，但还不是高吞吐或强评测版本：
 
-- rollout 可按 job 用线程并行；训练脚本默认 `ROLLOUT_WORKERS=4`，主要长尾仍来自 Python 候选枚举，CPU opponent-pool smoke 会比较慢。
+- rollout 可按 job 并行；训练脚本默认 `ROLLOUT_WORKERS=16`、`ROLLOUT_PROCESSES=16`，主进程集中 batched inference，主要长尾仍来自 Python 候选枚举和 reducer step，CPU opponent-pool smoke 会比较慢。
 - opponent pool 已具备 self、heuristic、dummy、previous 和额外 checkpoint 输入，但还没有 Elo/胜率驱动的自动历史池采样权重。
 - centralized critic 已能看完整训练 state；后续需要验证它对 value loss 和策略稳定性的实际收益。
 - reward 仍以局末/比赛末为主，shaping 只做小权重辅助并默认衰减，避免模型锁死在局部启发式。
@@ -437,7 +437,7 @@ PPO 初始化约束（2026-06-27）：
 
 - 对随机 seed 的所有枚举候选执行 reducer acceptance property test，覆盖 lead、play_or_pass、tribute、return_tribute。
 - Snapshot 候选与 state 候选的一致性测试：同一状态下 `legal_actions_for_state()` 与 `legal_actions_for_snapshot(seat_snapshot(...))` 应一致或只在明确字段缺失时有可解释差异。
-- 编码 schema snapshot test：保存 observation/action feature names，防止无意改变维度或顺序导致旧 checkpoint 静默不可用。
+- 编码 schema snapshot test：保存 observation/action feature names，防止无意改变维度或顺序导致当前 checkpoint 静默不可用。
 - 推理延迟 benchmark：按 candidate_count bucket 记录候选生成、编码、模型打分 p50/p95/p99。
 
 ## 优化建议
@@ -457,7 +457,7 @@ PPO 初始化约束（2026-06-27）：
 
 ## 优化建议前五条执行设计与进度（2026-06-28）
 
-本轮只执行上面优化建议的前五条，目标是先提高训练产物可验收性、checkpoint 兼容性、线上输入信息量和候选生成稳定性，不提前改动模型结构。
+本轮只执行上面优化建议的前五条，目标是先提高训练产物可验收性、checkpoint 严格校验、线上输入信息量和候选生成稳定性，不提前改动模型结构。
 
 ### 1. 训练评测门禁
 
@@ -472,7 +472,7 @@ PPO 初始化约束（2026-06-27）：
 
 - 新增 `training/eval_gate.py` 和命令 `guandan-eval-gate`。
 - `scripts/bc_train.sh` 在 BC checkpoint 输出后自动评测 vs dummy/heuristic。
-- `scripts/ppo_train.sh` 继续从 `data/models/ppo_actor_critic.pt` 训练到 `.next.pt` 后，自动评测 vs dummy/heuristic/previous checkpoint。
+- `scripts/ppo_train.sh` 默认从 `data/models/bc_ranker.pt` 启动第一版 PPO 到 `.next.pt` 后自动评测；继续训练时设置 `INIT_CHECKPOINT` 或 `BASE_MODEL` 为已有 PPO actor-critic checkpoint。
 - 新增 `tests/training/test_eval_gate.py` 覆盖评测摘要生成。
 
 命令：
@@ -485,17 +485,17 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 
 设计：
 
-- 编码 schema 明确版本化：旧 140/88 维为 `v1`，新增 public 统计和动作上下文后为 `v2`。
+- 编码 schema 明确为当前 `v2`，包含 public 已出牌统计和动作上下文特征。
 - schema manifest 包含 observation/action feature names、归一化规则和 hash。
 - BC cache、BC checkpoint、PPO checkpoint 都保存 `encoding_schema`。
-- checkpoint 加载时优先按 schema hash 校验；旧 checkpoint 没有 manifest 时按维度推断 `v1`/`v2`，保证现有 `data/models/ppo_actor_critic.pt` 可以继续训练。
+- checkpoint 加载时按 schema hash 严格校验；缺少 manifest 或 hash 不匹配时直接失败，避免静默使用错误特征。
 
 已执行：
 
-- `training/encode.py` 新增 `encoding_schema()`、`validate_encoding_schema()`、`ENCODING_SCHEMA_VERSION` 和 legacy 兼容。
+- `training/encode.py` 新增 `encoding_schema()`、`validate_encoding_schema()` 和 `ENCODING_SCHEMA_VERSION`，并在旧模型清理后移除 legacy 兼容。
 - `training/bc_cache.py`、`training/bc_train.py` 写入 schema manifest。
-- `training/ppo_train.py`、`training/rollout.py` 和 `npc/rl_agent/model_loader.py` 按 checkpoint schema 编码，避免用 v2 runtime 静默加载 v1 模型。
-- 新增/更新编码测试，覆盖 v1/v2 hash 差异和新增特征名。
+- `training/ppo_train.py`、`training/rollout.py` 和 `npc/rl_agent/model_loader.py` 按 checkpoint schema 编码，避免 runtime 静默加载错误模型。
+- 新增/更新编码测试，覆盖当前 v2 schema 和新增特征名。
 
 ### 3. 候选生成长尾优化
 
@@ -542,25 +542,25 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 
 - `training/encode.py` 的 v2 action features 增加：
   `action_beats_partner`、`action_beats_opponent`、`action_finishes_hand`、`action_opponent_danger`、`action_rank_margin`、`action_breaks_bomb`、`action_breaks_sequence`、`action_breaks_pair_run`。
-- BC/PPO/线上模型加载路径统一按 checkpoint schema 选择 v1 或 v2 编码。
+- BC/PPO/线上模型加载路径统一按 checkpoint schema 校验当前 v2 编码。
 - `tests/training/test_encode.py` 覆盖新增 action feature names 和字段存在性。
 
 ## 优化建议后五条执行设计与进度（2026-06-28）
 
-本轮执行优化建议 6-10。实现原则是保留旧 checkpoint 兼容，新增能力默认用于新训练；从旧 PPO checkpoint 继续训练时优先完整加载旧结构，不强制迁移架构。
+本轮执行优化建议 6-10。旧模型清理后，新增能力默认用于当前 `dual_tower_v1` + v2 schema 训练；从 PPO checkpoint 继续训练时要求 checkpoint 已是当前格式。
 
 ### 6. State/action 双塔模型
 
 设计：
 
 - 新增 `dual_tower_v1`：`state_encoder(obs)`、`action_encoder(action)`，再用 `[h, a, h*a, abs(h-a)]` 打分。
-- BC ranker 和 PPO actor 共用同一种候选 scorer；旧 `concat_mlp` 继续保留。
-- checkpoint 写入 `model_architecture`；旧 checkpoint 缺失该字段时按 `concat_mlp` 读取。
+- BC ranker 和 PPO actor 共用同一种 dual tower 候选 scorer。
+- checkpoint 写入并严格校验 `model_architecture=dual_tower_v1`。
 
 已执行：
 
-- `training/model.py` 新增 `DEFAULT_MODEL_ARCHITECTURE=dual_tower_v1`、双塔 scorer 和兼容的 concat MLP builder。
-- `training/bc_train.py` 支持 `--model-architecture`，新 BC 默认输出 dual tower checkpoint。
+- `training/model.py` 保留 `DEFAULT_MODEL_ARCHITECTURE=dual_tower_v1` 和双塔 scorer，删除旧 concat MLP builder。
+- `training/bc_train.py` 固定输出 dual tower checkpoint，不再暴露 `--model-architecture`。
 - `training/ppo_train.py` 从 checkpoint 推断 architecture；无 init 时默认 dual tower，从旧 PPO 继续时保持旧 concat 结构。
 - `npc/rl_agent/model_loader.py` 可加载 dual tower BC/PPO checkpoint。
 
@@ -570,7 +570,7 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 
 - actor 仍只看 `SeatSnapshot` observation/action features。
 - critic 在训练时可看完整 `MatchState`，包括四家手牌、active/finish、已出牌统计和当前 trick。
-- checkpoint 写入 `centralized_critic`、`critic_observation_dim` 和 feature names；旧 checkpoint 自动按 decentralized critic 加载。
+- checkpoint 写入并严格校验 `centralized_critic=True`、`critic_observation_dim` 和 feature names；不再按 decentralized critic 兼容旧 checkpoint。
 
 已执行：
 
@@ -590,7 +590,7 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 已执行：
 
 - `training/ppo_train.py` 新增 opponent pool job 构建、dummy/heuristic adapter 和 frozen checkpoint adapter。
-- `scripts/ppo_train.sh` 默认使用 `self,heuristic,dummy,previous`，previous 指 `BASE_MODEL`。
+- `scripts/ppo_train.sh` 默认使用 `self,heuristic,previous`，`previous` 指 `INIT_CHECKPOINT`/`BASE_MODEL`；CLI 仍支持手动加入 `dummy` 或重复传入 `--opponent-checkpoint`。
 - `tests/training/test_rollout_ppo.py` 覆盖 opponent pool 按 candidate team 展开 rollout jobs。
 
 ### 9. Rollout 吞吐
@@ -598,13 +598,13 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 设计：
 
 - 将 rollout 抽象成 jobs，支持按 seed/opponent/team 组合拆分。
-- `--rollout-workers` 使用线程并行收集 jobs；命令默认仍为 1，`scripts/ppo_train.sh` 默认提升为 4，以匹配 `self,heuristic,dummy,previous` opponent pool 展开的多 rollout jobs。
+- `--rollout-workers` 保留线程并行 fallback；`--rollout-processes` 大于 0 时使用多进程环境 actor。命令默认仍为单线程/单进程，`scripts/ppo_train.sh` 默认提升为 `ROLLOUT_WORKERS=16`、`ROLLOUT_PROCESSES=16`，匹配 opponent pool 展开的多 rollout jobs。
 - `TorchRolloutPolicy` 用 lock 包住模型 eval/inference，防止多线程下 train/eval 状态竞争。
 
 已执行：
 
-- `training/ppo_train.py` 新增 `_collect_rollout_jobs()` 和 `--rollout-workers`。
-- `scripts/ppo_train.sh` 暴露 `ROLLOUT_WORKERS`，默认值为 4；CPU/GPU 争用明显时可下调，候选枚举仍是主要长尾时可继续上调观察。
+- `training/ppo_train.py` 新增 `_collect_rollout_jobs()`、多进程 rollout actor、batched inference server、`--rollout-workers`、`--rollout-processes`、`--inference-batch-size` 和 `--inference-batch-wait-ms`。
+- `scripts/ppo_train.sh` 暴露 `ROLLOUT_WORKERS`、`ROLLOUT_PROCESSES`、`INFERENCE_BATCH_SIZE`、`INFERENCE_BATCH_WAIT_MS` 和 `CANDIDATE_BUCKET_BATCHES`；CPU/GPU 争用明显时可下调进程数或 batch size，候选枚举仍是主要长尾时可继续上调观察。
 - CPU 上 opponent pool 完整对局仍可能被候选枚举长尾拖慢；真实吞吐提升需要在 CUDA/长时训练中结合 `candidate_generation_cache_info()` 继续观察。
 
 ### 10. 分阶段奖励 shaping
@@ -621,3 +621,15 @@ uv run --extra train guandan-eval-gate data/models/ppo_actor_critic.next.pt --pr
 - `training/rollout.py` 将 `reward_shaping_weight` 传入环境。
 - `training/ppo_train.py` 每个 update 计算线性衰减权重。
 - `tests/training/test_env.py` 覆盖显式开启 shaping 后的终结出完奖励；`tests/training/test_rollout_ppo.py` 覆盖线性衰减计算。
+
+## Rollout 吞吐优化 TODO（2026-06-28）
+
+当前 PPO 计时显示训练耗时主要集中在 rollout，而不是 62 万参数模型的反向传播。优化顺序按“不改变训练语义、先观测再扩并发”的原则推进。
+
+1. [x] 增加 rollout profile。每个 rollout 汇总 `legal_actions`、policy 决策、critic 编码、transition 编码和 reducer step 用时，并记录候选数均值/最大值、encoded feature 复用率。PPO update 日志打印聚合 profile，用于判断后续瓶颈在候选生成、编码、模型推理还是 reducer。
+2. [x] 消除 PPO 当前策略的重复编码。`TorchRolloutPolicy` 选动作时已经完成 observation/action/critic 编码，`RolloutDecision` 携带这些 encoded features；`training/rollout.py` 写 transition 时优先复用，启发式和 frozen opponent 仍保留原编码路径。
+3. [x] 缩小模型推理锁影响。PPO rollout 阶段在 update 级别统一将模型置为 eval；单步决策使用 `torch.inference_mode()`，不再每个 action 反复切换 train/eval，也不再用锁包住候选编码和状态切换。
+4. [x] 基于 profile 做 batched inference。多个 rollout worker 先本地完成特征编码，再把已编码请求送入单个 inference loop；该 loop 在 `--inference-batch-wait-ms` 等待窗口内最多聚合 `--inference-batch-size` 个 decision 后统一 forward，减少 CUDA launch 和线程间模型争用。`scripts/ppo_train.sh` 默认启用 `INFERENCE_BATCH_SIZE=16`、`INFERENCE_BATCH_WAIT_MS=1.0`。
+5. [x] 将 rollout worker 从线程升级为多进程环境 actor。`--rollout-processes` 大于 0 时，每个 spawned worker 进程持有独立 `GuandanTrainingEnv`，在进程内执行合法候选生成、observation/action/critic 编码、transition 组装和 reducer step；当前 policy 的模型 forward 仍通过主进程集中 batched inference 完成，避免每个 worker 复制 CUDA context。checkpoint opponent 在 process 模式默认使用 CPU 加载，减少 GPU 争用。`scripts/ppo_train.sh` 默认 `ROLLOUT_PROCESSES=16`，需要回退线程模式时设为 `0`。
+6. [x] 做 candidate-count bucketing 或 segmented softmax。已先实现 candidate-count bucketing：PPO 更新阶段默认按候选动作数量的 power-of-two 桶组 minibatch，避免普通随机 batch 被少数首攻长尾候选 padding 到过宽矩阵；CLI 可用 `--no-candidate-bucket-batches` 回退，`scripts/ppo_train.sh` 可设 `CANDIDATE_BUCKET_BATCHES=0` 做 A/B。若后续 profile 仍显示训练 forward 被 padding 主导，再评估 segmented softmax。
+7. [ ] 增加 partial rollout 容错。`max_steps` 作为 truncated episode 记录 profile 和告警，避免单个长尾 job 让整个 update 已完成样本报废。

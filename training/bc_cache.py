@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from training.collect import BcSample, iter_jsonl
-from training.encode import ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION, encoding_schema
+from training.encode import ENCODING_SCHEMA_VERSION, encoding_schema
 from training.model import require_torch
 
 
@@ -300,15 +300,14 @@ def _known_encoding_schema(
     observation_dim: int,
     action_dim: int,
 ) -> dict[str, object] | None:
-    for version in (ENCODING_SCHEMA_VERSION, LEGACY_ENCODING_SCHEMA_VERSION):
-        schema = encoding_schema(version)
-        schema_observation_names = tuple(str(name) for name in schema["observation_names"])
-        schema_action_names = tuple(str(name) for name in schema["action_names"])
-        if observation_names and action_names:
-            if observation_names == schema_observation_names and action_names == schema_action_names:
-                return schema
-        elif len(schema_observation_names) == observation_dim and len(schema_action_names) == action_dim:
+    schema = encoding_schema(ENCODING_SCHEMA_VERSION)
+    schema_observation_names = tuple(str(name) for name in schema["observation_names"])
+    schema_action_names = tuple(str(name) for name in schema["action_names"])
+    if observation_names and action_names:
+        if observation_names == schema_observation_names and action_names == schema_action_names:
             return schema
+    elif len(schema_observation_names) == observation_dim and len(schema_action_names) == action_dim:
+        return schema
     return None
 
 

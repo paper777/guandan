@@ -22,14 +22,14 @@ class EncodingTests(unittest.TestCase):
         self.assertIn("trick_pass_count", encoded.names)
         self.assertEqual(len([name for name in encoded.names if name.startswith("hand_face/")]), len(CARD_FACES))
 
-    def test_encoding_schema_hash_changes_between_legacy_and_current_features(self) -> None:
-        legacy = encoding_schema("v1")
+    def test_encoding_schema_is_current_v2_only(self) -> None:
         current = encoding_schema("v2")
 
-        self.assertNotEqual(legacy["hash"], current["hash"])
-        self.assertNotIn("played_face/S-3", legacy["observation_names"])
+        self.assertEqual(current["version"], "v2")
         self.assertIn("played_face/S-3", current["observation_names"])
         self.assertIn("action_beats_opponent", current["action_names"])
+        with self.assertRaises(ValueError):
+            encoding_schema("v1")
 
     def test_observation_encoding_does_not_depend_on_opponent_card_identities(self) -> None:
         env = GuandanTrainingEnv()

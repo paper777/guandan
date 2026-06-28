@@ -103,7 +103,7 @@ class _LoadedModel:
 
 def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
     from training.model import (
-        CONCAT_MLP_ARCHITECTURE,
+        DEFAULT_MODEL_ARCHITECTURE,
         build_candidate_actor_critic,
         build_candidate_ranker,
         pair_feature_dim,
@@ -121,7 +121,12 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
     critic_observation_dim = int(checkpoint.get("critic_observation_dim", observation_dim))
     hidden_dim = int(checkpoint.get("hidden_dim", 256))
     dropout = float(checkpoint.get("dropout", 0.0))
-    model_architecture = str(checkpoint.get("model_architecture") or CONCAT_MLP_ARCHITECTURE)
+    model_architecture = checkpoint.get("model_architecture")
+    if model_architecture != DEFAULT_MODEL_ARCHITECTURE:
+        raise ValueError(
+            f"checkpoint model_architecture={model_architecture!r} is not supported; "
+            f"expected {DEFAULT_MODEL_ARCHITECTURE!r}"
+        )
     model_state = checkpoint.get("model_state")
     if not isinstance(model_state, dict):
         raise ValueError("checkpoint is missing model_state")
@@ -134,20 +139,18 @@ def _load_checkpoint(path: Path, device_name: str | None) -> _LoadedModel:
             value_input_dim=critic_observation_dim,
             hidden_dim=hidden_dim,
             dropout=dropout,
-            architecture=model_architecture,
         ).to(device)
+        if checkpoint.get("centralized_critic") is not True:
+            raise ValueError("PPO checkpoint must use centralized_critic=True")
         model.load_state_dict(model_state)
         kind = "ppo"
-    elif any(str(key).startswith("net.") for key in model_state) or any(
-        str(key).startswith("policy_net.") for key in model_state
-    ):
+    elif any(str(key).startswith("policy_net.") for key in model_state):
         model = build_candidate_ranker(
             pair_feature_dim(observation_dim, action_dim),
             observation_dim=observation_dim,
             action_dim=action_dim,
             hidden_dim=hidden_dim,
             dropout=dropout,
-            architecture=model_architecture,
         ).to(device)
         model.load_state_dict(model_state)
         kind = "bc"
