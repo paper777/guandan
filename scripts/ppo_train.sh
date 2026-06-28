@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+BASE_MODEL="${BASE_MODEL:-data/models/ppo_actor_critic.pt}"
 INIT_CHECKPOINT="${INIT_CHECKPOINT:-${BASE_MODEL:-data/models/bc_ranker.pt}}"
 # First PPO bootstrap should use a BC ranker checkpoint. To continue PPO later, set INIT_CHECKPOINT to a PPO actor-critic checkpoint.
 OUTPUT_MODEL="${OUTPUT_MODEL:-data/models/ppo_actor_critic.next.pt}"
-SEED_COUNT="${SEED_COUNT:-10}"
+SEED_COUNT="${SEED_COUNT:-100}"
 UPDATES="${UPDATES:-10}"
 MAX_DEALS="${MAX_DEALS:-24}"
 EPOCHS_PER_UPDATE="${EPOCHS_PER_UPDATE:-3}"

@@ -17,8 +17,10 @@ from server.services.snapshots import SeatSnapshot, seat_snapshot
 
 
 HAND_STRENGTH_REWARD_WEIGHT = 0.35
+STRONG_LOSS_PENALTY_WEIGHT = 0.30
 MIN_HAND_STRENGTH_REWARD_MULTIPLIER = 0.65
 MAX_HAND_STRENGTH_REWARD_MULTIPLIER = 1.35
+MAX_STRONG_LOSS_REWARD_MULTIPLIER = 1.60
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,12 @@ class InitialHandProfile:
     @property
     def strength_score(self) -> float:
         return _clamp(0.65 * self.control_score + 0.35 * self.regularity_score, 0.0, 1.0)
+
+
+@dataclass(frozen=True, slots=True)
+class RewardMultipliers:
+    winner: float
+    loser: float
 
 
 class GuandanTrainingEnv:
@@ -168,13 +176,15 @@ def _rewards_for_transition(
     rewards = {seat: 0.0 for seat in SEATS}
     if current is None or current == previous:
         return rewards
-    reward_multiplier = _reward_multiplier_for_result(current, initial_hands or {}, level)
-    deal_reward = (current.advance_count / 3.0) * reward_multiplier
+    reward_multipliers = _reward_multipliers_for_result(current, initial_hands or {}, level)
+    advance_reward = current.advance_count / 3.0
+    deal_reward = advance_reward * reward_multipliers.winner
+    deal_penalty = advance_reward * reward_multipliers.loser
     _add_team_reward(rewards, current.winning_team, deal_reward)
-    _add_team_reward(rewards, _opposing_team(current.winning_team), -deal_reward)
+    _add_team_reward(rewards, _opposing_team(current.winning_team), -deal_penalty)
     if current.match_complete:
-        _add_team_reward(rewards, current.winning_team, reward_multiplier)
-        _add_team_reward(rewards, _opposing_team(current.winning_team), -reward_multiplier)
+        _add_team_reward(rewards, current.winning_team, reward_multipliers.winner)
+        _add_team_reward(rewards, _opposing_team(current.winning_team), -reward_multipliers.loser)
     return rewards
 
 
@@ -224,16 +234,33 @@ def _has_dangerous_opponent(state: MatchState, seat: Seat) -> bool:
 
 
 def _reward_multiplier_for_result(result: DealResult, initial_hands: dict[Seat, tuple[str, ...]], level: Rank) -> float:
+    return _reward_multipliers_for_result(result, initial_hands, level).winner
+
+
+def _reward_multipliers_for_result(
+    result: DealResult,
+    initial_hands: dict[Seat, tuple[str, ...]],
+    level: Rank,
+) -> RewardMultipliers:
     if any(seat not in initial_hands for seat in SEATS):
-        return 1.0
+        return RewardMultipliers(winner=1.0, loser=1.0)
     winning_strength = _team_initial_strength(result.winning_team, initial_hands, level)
     losing_strength = _team_initial_strength(_opposing_team(result.winning_team), initial_hands, level)
     relative_advantage = winning_strength - losing_strength
-    return _clamp(
+    winner = _clamp(
         1.0 - HAND_STRENGTH_REWARD_WEIGHT * relative_advantage,
         MIN_HAND_STRENGTH_REWARD_MULTIPLIER,
         MAX_HAND_STRENGTH_REWARD_MULTIPLIER,
     )
+    loser_advantage = losing_strength - winning_strength
+    loser = _clamp(
+        1.0
+        + HAND_STRENGTH_REWARD_WEIGHT * loser_advantage
+        + STRONG_LOSS_PENALTY_WEIGHT * max(loser_advantage, 0.0),
+        MIN_HAND_STRENGTH_REWARD_MULTIPLIER,
+        MAX_STRONG_LOSS_REWARD_MULTIPLIER,
+    )
+    return RewardMultipliers(winner=winner, loser=loser)
 
 
 def _team_initial_strength(team: Team, initial_hands: dict[Seat, tuple[str, ...]], level: Rank) -> float:

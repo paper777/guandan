@@ -7,7 +7,13 @@ from server.domain.cards import Rank
 from server.domain.legal_actions import ActionCandidate
 from server.domain.seats import SEATS, Seat, Team
 from server.domain.state import DealResult, DealState, MatchPhase, TrickState
-from training.env import GuandanTrainingEnv, _initial_hand_profile, _reward_multiplier_for_result
+from training.env import (
+    GuandanTrainingEnv,
+    _initial_hand_profile,
+    _reward_multiplier_for_result,
+    _reward_multipliers_for_result,
+    _rewards_for_transition,
+)
 
 
 class GuandanTrainingEnvTests(unittest.TestCase):
@@ -110,48 +116,7 @@ class GuandanTrainingEnvTests(unittest.TestCase):
         self.assertAlmostEqual(step.rewards[Seat.EAST], 0.08)
 
     def test_reward_multiplier_discounts_strong_winners_and_rewards_upsets(self) -> None:
-        initial_hands = {
-            Seat.EAST: (
-                "D1-BJ",
-                "D2-BJ",
-                "D1-SJ",
-                "D2-SJ",
-                "D1-S-A",
-                "D2-S-A",
-                "D1-H-A",
-                "D2-H-A",
-            ),
-            Seat.WEST: (
-                "D1-S-K",
-                "D2-S-K",
-                "D1-H-K",
-                "D2-H-K",
-                "D1-S-Q",
-                "D2-S-Q",
-                "D1-H-Q",
-                "D2-H-Q",
-            ),
-            Seat.SOUTH: (
-                "D1-S-3",
-                "D1-H-4",
-                "D1-C-6",
-                "D1-D-8",
-                "D2-S-10",
-                "D2-H-J",
-                "D2-C-Q",
-                "D2-D-K",
-            ),
-            Seat.NORTH: (
-                "D2-S-3",
-                "D2-H-4",
-                "D2-C-6",
-                "D2-D-8",
-                "D1-S-10",
-                "D1-H-J",
-                "D1-C-Q",
-                "D1-D-K",
-            ),
-        }
+        initial_hands = _strong_east_west_initial_hands()
         strong_win = _reward_multiplier_for_result(
             _deal_result(Team.EAST_WEST),
             initial_hands,
@@ -166,6 +131,20 @@ class GuandanTrainingEnvTests(unittest.TestCase):
         self.assertLess(strong_win, 1.0)
         self.assertGreater(weak_win, 1.0)
         self.assertLess(strong_win, weak_win)
+
+    def test_reward_multipliers_penalize_strong_losing_team_more_than_upset_reward(self) -> None:
+        initial_hands = _strong_east_west_initial_hands()
+        result = _deal_result(Team.SOUTH_NORTH)
+
+        multipliers = _reward_multipliers_for_result(result, initial_hands, Rank.TWO)
+        rewards = _rewards_for_transition(None, result, initial_hands=initial_hands, level=Rank.TWO)
+
+        self.assertGreater(multipliers.winner, 1.0)
+        self.assertGreater(multipliers.loser, multipliers.winner)
+        self.assertAlmostEqual(rewards[Seat.SOUTH], multipliers.winner)
+        self.assertAlmostEqual(rewards[Seat.NORTH], multipliers.winner)
+        self.assertAlmostEqual(rewards[Seat.EAST], -multipliers.loser)
+        self.assertAlmostEqual(rewards[Seat.WEST], -multipliers.loser)
 
     def test_start_next_deal_after_deal_complete(self) -> None:
         env = GuandanTrainingEnv()
@@ -228,6 +207,51 @@ def _action_by_cards(env: GuandanTrainingEnv, seat: Seat, card_ids: tuple[str, .
         if action.card_ids == card_ids:
             return action
     raise AssertionError(f"no legal action for {seat.value}: {card_ids}")
+
+
+def _strong_east_west_initial_hands() -> dict[Seat, tuple[str, ...]]:
+    return {
+        Seat.EAST: (
+            "D1-BJ",
+            "D2-BJ",
+            "D1-SJ",
+            "D2-SJ",
+            "D1-S-A",
+            "D2-S-A",
+            "D1-H-A",
+            "D2-H-A",
+        ),
+        Seat.WEST: (
+            "D1-S-K",
+            "D2-S-K",
+            "D1-H-K",
+            "D2-H-K",
+            "D1-S-Q",
+            "D2-S-Q",
+            "D1-H-Q",
+            "D2-H-Q",
+        ),
+        Seat.SOUTH: (
+            "D1-S-3",
+            "D1-H-4",
+            "D1-C-6",
+            "D1-D-8",
+            "D2-S-10",
+            "D2-H-J",
+            "D2-C-Q",
+            "D2-D-K",
+        ),
+        Seat.NORTH: (
+            "D2-S-3",
+            "D2-H-4",
+            "D2-C-6",
+            "D2-D-8",
+            "D1-S-10",
+            "D1-H-J",
+            "D1-C-Q",
+            "D1-D-K",
+        ),
+    }
 
 
 def _deal_result(winning_team: Team) -> DealResult:
